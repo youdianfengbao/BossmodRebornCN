@@ -28,7 +28,7 @@ sealed class IPCList(Replay replay, Replay.Encounter? enc, IEnumerable<WorldStat
             }
             var p = best;
             var adjNow = p == null ? Now : Now < p.EffectiveExistence.Start ? p.EffectiveExistence.Start : Now > p.EffectiveExistence.End ? p.EffectiveExistence.End : Now;
-            return p != null || instanceID == 0 ? ReplayUtils.ParticipantPosRotString(p, adjNow) : $"<unknown> {instanceID:X}";
+            return p != null || instanceID == 0 ? ReplayUtils.ParticipantPosRotString(p, adjNow) : $"<未知> {instanceID:X}";
         }
 
         protected override NetworkState.IDScrambleFields GetScramble()
@@ -125,13 +125,13 @@ sealed class IPCList(Replay replay, Replay.Encounter? enc, IEnumerable<WorldStat
 
     private void ContextMenu(NetworkState.OpServerIPC op)
     {
-        if (ImGui.MenuItem($"Filter out opcode {op.Packet.ID}"))
+        if (ImGui.MenuItem($"过滤掉操作码 {op.Packet.ID}"))
         {
             _filteredPackets.Add(op.Packet.ID);
             _filterInvert = false;
             _nodes = null;
         }
-        if (ImGui.MenuItem($"Focus opcode {op.Packet.ID}"))
+        if (ImGui.MenuItem($"仅显示操作码 {op.Packet.ID}"))
         {
             _filteredPackets.Clear();
             _filteredPackets.Add(op.Packet.ID);
@@ -139,7 +139,7 @@ sealed class IPCList(Replay replay, Replay.Encounter? enc, IEnumerable<WorldStat
             _nodes = null;
         }
         ImGui.Separator();
-        if (ImGui.MenuItem("Jump to timestamp", "double click"))
+        if (ImGui.MenuItem("跳转到时间戳", "双击"))
             scrollTo(op.Timestamp);
     }
 }

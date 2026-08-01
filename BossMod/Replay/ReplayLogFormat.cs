@@ -2,16 +2,16 @@
 
 public enum ReplayLogFormat
 {
-    [PropertyDisplay("Compressed binary")]
+    [PropertyDisplay("压缩二进制")]
     BinaryCompressed,
 
-    [PropertyDisplay("Raw binary")]
+    [PropertyDisplay("原始二进制")]
     BinaryUncompressed,
 
-    [PropertyDisplay("Condensed text")]
+    [PropertyDisplay("精简文本")]
     TextCondensed,
 
-    [PropertyDisplay("Verbose text")]
+    [PropertyDisplay("详细文本")]
     TextVerbose,
 }
 

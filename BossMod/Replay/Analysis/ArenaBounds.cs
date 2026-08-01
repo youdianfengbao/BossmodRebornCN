@@ -74,7 +74,7 @@ sealed class ArenaBounds
 
     public void DrawContextMenu()
     {
-        if (ImGui.MenuItem("Generate complex arena bounds from player movement"))
+        if (ImGui.MenuItem("根据玩家移动生成复杂场地边界"))
         {
             Task.Run(() =>
             {

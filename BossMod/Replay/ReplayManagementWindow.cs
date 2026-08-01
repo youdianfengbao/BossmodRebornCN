@@ -77,7 +77,7 @@ public sealed class ReplayManagementWindow : UIWindow
 
     public override void Draw()
     {
-        if (ImGui.Button(!IsRecording() ? "Start recording" : "Stop recording"))
+        if (ImGui.Button(!IsRecording() ? "开始录制" : "停止录制"))
         {
             if (!IsRecording())
             {
@@ -90,9 +90,9 @@ public sealed class ReplayManagementWindow : UIWindow
             }
         }
         ImGui.SameLine();
-        if (ImGui.Button("Select replay folder"))
+        if (ImGui.Button("选择回放文件夹"))
         {
-            _folderDialog ??= new FileDialog("select_replay_folder", "Select replay folder", "", _config.ReplayFolder, "", "", 1, false, ImGuiFileDialogFlags.SelectOnly);
+            _folderDialog ??= new FileDialog("select_replay_folder", "选择回放文件夹", "", _config.ReplayFolder, "", "", 1, false, ImGuiFileDialogFlags.SelectOnly);
             _folderDialog.Show();
         }
 
@@ -110,7 +110,7 @@ public sealed class ReplayManagementWindow : UIWindow
         {
             ImGui.InputText("###msg", ref _message, 1024);
             ImGui.SameLine();
-            if (ImGui.Button("Add log marker") && _message.Length > 0)
+            if (ImGui.Button("添加日志标记") && _message.Length > 0)
             {
                 _ws.Execute(new WorldState.OpUserMarker(_message));
                 _message = "";
@@ -118,7 +118,7 @@ public sealed class ReplayManagementWindow : UIWindow
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Open replay folder") && _logDir != null)
+        if (ImGui.Button("打开回放文件夹") && _logDir != null)
         {
             _lastErrorMessage = OpenDirectory(_logDir);
         }
@@ -138,7 +138,7 @@ public sealed class ReplayManagementWindow : UIWindow
 
     public override void OnClose() => SetVisible(false);
 
-    private void UpdateTitle() => WindowName = $"Replay recording: {(_recorder != null ? "in progress..." : "idle")}{_windowID}";
+    private void UpdateTitle() => WindowName = $"回放录制: {(_recorder != null ? "录制中..." : "空闲")}{_windowID}";
 
     public bool ShouldAutoRecord => _config.AutoRecord && (_config.AutoARR || !Service.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.DutyRecorderPlayback]);
 
@@ -151,7 +151,7 @@ public sealed class ReplayManagementWindow : UIWindow
                 if (id == default)
                 {
                     StartRecording("");
-                    Service.ChatGui.Print("[BMR] Replay recording started");
+                    Service.ChatGui.Print("[BMR] 回放录制已开始");
                 }
             });
             _disableAlertLinkPayload ??= Service.ChatGui.AddChatLinkHandler(2u, (id, str) =>
@@ -160,13 +160,13 @@ public sealed class ReplayManagementWindow : UIWindow
                 {
                     _config.ImportantDutyAlert = false;
                     _config.Modified.Fire();
-                    Service.ChatGui.Print("[BMR] Important duty alert disabled");
+                    Service.ChatGui.Print("[BMR] 重要战斗提醒已禁用");
                 }
             });
             var alertPayload =
-                new TextPayload("[BMR] This duty does not yet have a complete module. Recording and uploading a replay will help enable module creation. ");
-            var linkTextPayload = new TextPayload("[Start replay recording]");
-            var disableTextPayload = new TextPayload("[Permanently disable these alerts]");
+                new TextPayload("[BMR] 此战斗还没有完整的模块。录制并上传回放将有助于创建模块。 ");
+            var linkTextPayload = new TextPayload("[开始录制回放]");
+            var disableTextPayload = new TextPayload("[永久禁用这些提醒]");
 
             var seString = new SeStringBuilder()
                 .Add(alertPayload)
@@ -364,13 +364,13 @@ public sealed class ReplayManagementWindow : UIWindow
                             UseShellExecute = true
                         });
                     });
-                    Service.ChatGui.Print($"[BMR] The path to your replay is: {path}");
+                    Service.ChatGui.Print($"[BMR] 你的回放路径为：{path}");
                 }
             });
             var alertPayload =
                 new TextPayload(
-                    "[BMR] You recorded a duty without a complete module. Uploading this replay helps with module development. ");
-            var linkTextPayload = new TextPayload("[Upload the replay]");
+                    "[BMR] 你录制了一场没有完整模块的战斗。上传此回放有助于模块开发。 ");
+            var linkTextPayload = new TextPayload("[上传回放]");
             var seString = new SeStringBuilder().Add(alertPayload).Add(_uploadLinkPayload).Add(linkTextPayload).Add(RawPayload.LinkTerminator).Build();
             Service.ChatGui.Print(seString);
         }
@@ -451,7 +451,7 @@ public sealed class ReplayManagementWindow : UIWindow
     {
         if (!dir.Exists)
         {
-            return $"Directory '{dir}' not found.";
+            return $"未找到目录 '{dir}'。";
         }
 
         try
@@ -462,7 +462,7 @@ public sealed class ReplayManagementWindow : UIWindow
         catch (Exception e)
         {
             Service.Log($"Error opening directory {dir}: {e}");
-            return $"Failed to open folder '{dir}', open it manually.";
+            return $"无法打开文件夹 '{dir}'，请手动打开。";
         }
     }
 }

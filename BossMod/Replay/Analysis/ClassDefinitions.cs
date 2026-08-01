@@ -227,29 +227,29 @@ sealed class ClassDefinitions
 
     public void Draw(UITree tree)
     {
-        tree.LeafNode("Shared data generator", contextMenu: CtxMenuShared);
-        foreach (var nr in tree.Node("Classes"))
+        tree.LeafNode("共享数据生成器", contextMenu: CtxMenuShared);
+        foreach (var nr in tree.Node("职业"))
         {
             foreach (var nc in tree.Nodes(_classData, kv => new(kv.Key.ToString()), kv => CtxMenuClass(kv.Value)))
             {
-                foreach (var na in tree.Node("All actions"))
+                foreach (var na in tree.Node("全部动作"))
                 {
                     DrawActions(tree, nc.Value.Actions);
                 }
-                foreach (var ng in tree.Node("Actions by CD group"))
+                foreach (var ng in tree.Node("按冷却组排列的动作"))
                 {
-                    foreach (var ncd in tree.Nodes(nc.Value.ByCDGroup, kv => new($"{kv.Key} ({kv.Value.Count} actions)")))
+                    foreach (var ncd in tree.Nodes(nc.Value.ByCDGroup, kv => new($"{kv.Key} ({kv.Value.Count} 个动作)")))
                     {
                         DrawActions(tree, ncd.Value);
                     }
                 }
-                foreach (var nt in tree.Node("Traits"))
+                foreach (var nt in tree.Node("特性"))
                 {
                     tree.LeafNodes(nc.Value.Traits, t => $"{t.RowId} '{t.Name}': {UnlockString(t.Level, t.Quest.RowId)}");
                 }
             }
         }
-        foreach (var nr in tree.Node("Actions by anim lock"))
+        foreach (var nr in tree.Node("按动画锁定排列的动作"))
         {
             foreach (var nl in tree.Nodes(_byLock, kv => new(kv.Key.ToString())))
             {
@@ -259,16 +259,16 @@ sealed class ClassDefinitions
                 }
             }
         }
-        foreach (var nr in tree.Node("Actions by category"))
+        foreach (var nr in tree.Node("按类别排列的动作"))
         {
             foreach (var nc in tree.Nodes(_byCategory, kv => new(kv.Key)))
             {
                 DrawActions(tree, nc.Value);
             }
         }
-        foreach (var nr in tree.Node("Actions by CD group"))
+        foreach (var nr in tree.Node("按冷却组排列的动作"))
         {
-            foreach (var nc in tree.Nodes(_byCDGroup, kv => new($"{kv.Key} ({kv.Value.Count} actions)")))
+            foreach (var nc in tree.Nodes(_byCDGroup, kv => new($"{kv.Key} ({kv.Value.Count} 个动作)")))
             {
                 DrawActions(tree, nc.Value);
             }
@@ -319,33 +319,33 @@ sealed class ClassDefinitions
     {
         static string suffix(BitMask m) => m.NumSetBits() switch
         {
-            0 => " [no owning classes]",
+            0 => " [无归属职业]",
             1 => "",
-            _ => " [shared]"
+            _ => " [共享]"
         };
         foreach (var na in tree.Nodes(actions, kv => new($"L{kv.Row?.ClassJobLevel} {kv.ID}{suffix(kv.OwningClasses)}", false, kv.Error ? Colors.TextColor3 : kv.Warning ? Colors.TextColor2 : Colors.TextColor1)))
         {
-            tree.LeafNode($"Definition: {na.Definition}");
-            tree.LeafNode($"Row: {na.Row}, raw range: {na.Row?.Range}, class: {na.Row?.ClassJob.ValueNullable?.Abbreviation}, category: {na.Row?.ClassJobCategory.ValueNullable?.Name}");
-            tree.LeafNode($"Unlock: {UnlockString(na.Row?.ClassJobLevel ?? 0, na.Row?.UnlockLink.RowId ?? 0)}");
-            tree.LeafNode($"Warnings: {(na.PotentiallyRemoved ? "PR " : "")}{(na.ReplayOnly ? "RO " : "")}", na.PotentiallyRemoved || na.ReplayOnly ? Colors.TextColor3 : Colors.TextColor1);
-            tree.LeafNode($"Targets: [{ActionDefinitions.Instance.ActionAllowedTargets(na.ID)}]");
-            tree.LeafNode($"Can be put on action bar: {na.CanBePutOnActionBar}");
-            tree.LeafNode($"Is role action: {na.IsRoleAction}");
-            tree.LeafNode($"Expected anim lock: {na.ExpectedInstantAnimLock} / {na.ExpectedCastAnimLock}", na.SeenDifferentInstantAnimLocks || na.SeenDifferentCastAnimLocks ? Colors.TextColor3 : Colors.TextColor1);
-            foreach (var nl in tree.Nodes(na.InstantByAnimLock, kv => new($"Observed instant anim lock: {kv.Key}")))
+            tree.LeafNode($"定义: {na.Definition}");
+            tree.LeafNode($"数据行: {na.Row}, 原始范围: {na.Row?.Range}, 职业: {na.Row?.ClassJob.ValueNullable?.Abbreviation}, 类别: {na.Row?.ClassJobCategory.ValueNullable?.Name}");
+            tree.LeafNode($"解锁: {UnlockString(na.Row?.ClassJobLevel ?? 0, na.Row?.UnlockLink.RowId ?? 0)}");
+            tree.LeafNode($"警告: {(na.PotentiallyRemoved ? "PR " : "")}{(na.ReplayOnly ? "RO " : "")}", na.PotentiallyRemoved || na.ReplayOnly ? Colors.TextColor3 : Colors.TextColor1);
+            tree.LeafNode($"目标: [{ActionDefinitions.Instance.ActionAllowedTargets(na.ID)}]");
+            tree.LeafNode($"可放入动作栏: {na.CanBePutOnActionBar}");
+            tree.LeafNode($"是否为职能动作: {na.IsRoleAction}");
+            tree.LeafNode($"预期动画锁定: {na.ExpectedInstantAnimLock} / {na.ExpectedCastAnimLock}", na.SeenDifferentInstantAnimLocks || na.SeenDifferentCastAnimLocks ? Colors.TextColor3 : Colors.TextColor1);
+            foreach (var nl in tree.Nodes(na.InstantByAnimLock, kv => new($"观测到即时动画锁定: {kv.Key}")))
             {
                 DrawEntries(tree, nl.Value);
             }
-            foreach (var nl in tree.Nodes(na.CastByAnimLock, kv => new($"Observed cast anim lock: {kv.Key}")))
+            foreach (var nl in tree.Nodes(na.CastByAnimLock, kv => new($"观测到施法动画锁定: {kv.Key}")))
             {
                 DrawEntries(tree, nl.Value);
             }
-            foreach (var ns in tree.Node("Statuses applied to self", na.AppliedStatusesToSource.Count == 0))
+            foreach (var ns in tree.Node("施加于自身的状态", na.AppliedStatusesToSource.Count == 0))
             {
                 tree.LeafNodes(na.AppliedStatusesToSource, Utils.StatusString);
             }
-            foreach (var ns in tree.Node("Statuses applied to target", na.AppliedStatusesToTarget.Count == 0))
+            foreach (var ns in tree.Node("施加于目标的状态", na.AppliedStatusesToTarget.Count == 0))
             {
                 tree.LeafNodes(na.AppliedStatusesToTarget, Utils.StatusString);
             }
@@ -367,7 +367,7 @@ sealed class ClassDefinitions
     {
         var ns = "ClassShared";
 
-        if (ImGui.MenuItem("Generate AID enum"))
+        if (ImGui.MenuItem("生成 AID 枚举"))
         {
             var writer = new AIDWriter(ns);
             writer.Add("None", 0);
@@ -384,7 +384,7 @@ sealed class ClassDefinitions
             ImGui.SetClipboardText(writer.Result());
         }
 
-        if (ImGui.MenuItem("Generate definitions constructor"))
+        if (ImGui.MenuItem("生成定义构造函数"))
         {
             var writer = new DefinitionWriter(ns);
             writer.Add(_actionData[ActionDefinitions.IDSprint]);
@@ -403,32 +403,32 @@ sealed class ClassDefinitions
 
     private void CtxMenuClass(ClassData cd)
     {
-        if (ImGui.MenuItem("Generate full definition"))
+        if (ImGui.MenuItem("生成完整定义"))
         {
             ImGui.SetClipboardText(GenerateClassDefinition(cd, false));
         }
 
-        if (ImGui.MenuItem("Generate definition stub"))
+        if (ImGui.MenuItem("生成定义骨架"))
         {
             ImGui.SetClipboardText(GenerateClassDefinition(cd, true));
         }
 
-        if (ImGui.MenuItem("Generate AID enum"))
+        if (ImGui.MenuItem("生成 AID 枚举"))
         {
             ImGui.SetClipboardText(GenerateClassAID(cd));
         }
 
-        if (ImGui.MenuItem("Generate TraitID enum"))
+        if (ImGui.MenuItem("生成 TraitID 枚举"))
         {
             ImGui.SetClipboardText(GenerateClassTraitID(cd));
         }
 
-        if (ImGui.MenuItem("Generate SID enum"))
+        if (ImGui.MenuItem("生成 SID 枚举"))
         {
             ImGui.SetClipboardText(GenerateClassSID(cd));
         }
 
-        if (ImGui.MenuItem("Generate definitions constructor"))
+        if (ImGui.MenuItem("生成定义构造函数"))
         {
             ImGui.SetClipboardText(GenerateClassRegistration(cd));
         }

@@ -16,9 +16,9 @@ public sealed class ColumnActorHP : Timeline.ColumnGroup, IToggleableColumn
         : base(timeline)
     {
         Name = "HP";
-        _hpBase = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "Base"));
-        _hpExtended = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "Bonus"));
-        _shield = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "Shield"));
+        _hpBase = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "基础"));
+        _hpExtended = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "额外"));
+        _shield = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "护盾"));
 
         var initial = actor.HPMPAt(enc.Time.Start);
         var prevTime = enc.Time.Start;

@@ -6,26 +6,26 @@ public static class ReplayUtils
     {
         if (p == null)
         {
-            return "<none>";
+            return "<无>";
         }
 
         var name = p.NameAt(t);
         return $"{p.Type} {p.InstanceID:X} ({p.OID:X}/{name.id}) '{name.name}' {p.LayoutID:X}";
     }
 
-    public static string ParticipantPosRotString(Replay.Participant? p, DateTime t) => p != null ? $"{ParticipantString(p, t)} {Utils.PosRotString(p.PosRotAt(t))}" : "<none>";
+    public static string ParticipantPosRotString(Replay.Participant? p, DateTime t) => p != null ? $"{ParticipantString(p, t)} {Utils.PosRotString(p.PosRotAt(t))}" : "<无>";
 
     public static string ActionEffectString(ActionEffect eff)
     {
         var s = $"{eff.Type}: {eff.Param0:X2} {eff.Param1:X2} {eff.Param2:X2} {eff.Param3:X2} {eff.Param4:X2} {eff.Value:X4}";
         if (eff.FromTarget)
         {
-            s = "(from target) " + s;
+            s = "(来自目标) " + s;
         }
 
         if (eff.AtSource)
         {
-            s = "(at source) " + s;
+            s = "(在来源) " + s;
         }
 
         var desc = ActionEffectParser.DescribeFields(eff);
@@ -39,9 +39,9 @@ public static class ReplayUtils
 
     public static string ActionTargetString(Replay.ActionTarget t, DateTime ts)
     {
-        var confirmTarget = t.ConfirmationTarget != default ? $"confirmed at +{(t.ConfirmationTarget - ts).TotalSeconds:f3}s" : "unconfirmed";
-        var confirmSource = t.ConfirmationSource != default ? $"confirmed at +{(t.ConfirmationSource - ts).TotalSeconds:f3}s" : "unconfirmed";
-        return $"{ParticipantPosRotString(t.Target, ts)}, target {confirmTarget}, source {confirmSource}";
+        var confirmTarget = t.ConfirmationTarget != default ? $"确认于 +{(t.ConfirmationTarget - ts).TotalSeconds:f3}s" : "未确认";
+        var confirmSource = t.ConfirmationSource != default ? $"确认于 +{(t.ConfirmationSource - ts).TotalSeconds:f3}s" : "未确认";
+        return $"{ParticipantPosRotString(t.Target, ts)}, 目标 {confirmTarget}, 来源 {confirmSource}";
     }
 
     public static int ActionDamage(Replay.ActionTarget a)

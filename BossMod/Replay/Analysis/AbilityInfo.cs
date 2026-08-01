@@ -120,7 +120,7 @@ sealed class AbilityInfo : CommonEnumInfo
             _plot.Begin();
             foreach (var i in _points)
             {
-                _plot.Point(new(i.Angle, i.Range), i.Hit ? Colors.TextColor2 : Colors.PlayerGeneric, () => $"{(i.Hit ? "hit" : "miss")} {i.Target.NameAt(i.Inst.Action.Timestamp)} {i.Target.InstanceID:X} {i.Inst.TimestampString()}");
+                _plot.Point(new(i.Angle, i.Range), i.Hit ? Colors.TextColor2 : Colors.PlayerGeneric, () => $"{(i.Hit ? "命中" : "未命中")} {i.Target.NameAt(i.Inst.Action.Timestamp)} {i.Target.InstanceID:X} {i.Inst.TimestampString()}");
             }
 
             _plot.End();
@@ -169,7 +169,7 @@ sealed class AbilityInfo : CommonEnumInfo
             _plot.Begin();
             foreach (var i in _points)
             {
-                _plot.Point(new(i.Normal, i.Length), i.Hit ? Colors.TextColor2 : Colors.PlayerGeneric, () => $"{(i.Hit ? "hit" : "miss")} {i.Target.NameAt(i.Inst.Action.Timestamp)} {i.Target.InstanceID:X} {i.Inst.TimestampString()}");
+                _plot.Point(new(i.Normal, i.Length), i.Hit ? Colors.TextColor2 : Colors.PlayerGeneric, () => $"{(i.Hit ? "命中" : "未命中")} {i.Target.NameAt(i.Inst.Action.Timestamp)} {i.Target.InstanceID:X} {i.Inst.TimestampString()}");
             }
 
             _plot.End();
@@ -255,7 +255,7 @@ sealed class AbilityInfo : CommonEnumInfo
             _plot.Begin();
             foreach (var i in _points)
             {
-                _plot.Point(new(i.Angle.Deg, 1), i.Hit ? Colors.TextColor2 : Colors.PlayerGeneric, () => $"{(i.Hit ? "hit" : "miss")} {i.Target.NameAt(i.Inst.Action.Timestamp)} {i.Target.InstanceID:X} {i.Inst.TimestampString()}");
+                _plot.Point(new(i.Angle.Deg, 1), i.Hit ? Colors.TextColor2 : Colors.PlayerGeneric, () => $"{(i.Hit ? "命中" : "未命中")} {i.Target.NameAt(i.Inst.Action.Timestamp)} {i.Target.InstanceID:X} {i.Inst.TimestampString()}");
             }
 
             _plot.End();
@@ -349,19 +349,19 @@ sealed class AbilityInfo : CommonEnumInfo
         {
             foreach (var (dist, points) in _byDistance)
             {
-                DrawPoints(tree, $"Distance {dist}", points);
+                DrawPoints(tree, $"距离 {dist}", points);
             }
 
             foreach (var (kind, points) in _byKind)
             {
-                DrawPoints(tree, $"Type {kind}", points);
+                DrawPoints(tree, $"类型 {kind}", points);
             }
 
-            DrawPoints(tree, "Ignore immunity", _immuneIgnores);
-            DrawPoints(tree, "Ignore transcendent", _transcendentIgnores);
-            DrawPoints(tree, "Misses while immune", _immuneMisses);
-            DrawPoints(tree, "Misses while transcendent", _transcendentMisses);
-            DrawPoints(tree, "Misses in other states", _otherMisses);
+            DrawPoints(tree, "无视免疫", _immuneIgnores);
+            DrawPoints(tree, "无视超越状态", _transcendentIgnores);
+            DrawPoints(tree, "免疫期间未命中", _immuneMisses);
+            DrawPoints(tree, "超越状态期间未命中", _transcendentMisses);
+            DrawPoints(tree, "其他状态未命中", _otherMisses);
         }
 
         private void AddPoint(Instance inst, Replay.ActionTarget target, int distance, GenericKnockback.Kind kind)
@@ -556,29 +556,29 @@ sealed class AbilityInfo : CommonEnumInfo
         }
         foreach (var (aid, data) in tree.Nodes(_data, map))
         {
-            tree.LeafNode($"Caster IDs: {OIDListString(data.CasterOIDs)}");
-            tree.LeafNode($"Target IDs: {OIDListString(data.TargetOIDs)}");
-            tree.LeafNode($"Targets:{JoinStrings(ActionTargetStrings(data))}");
-            tree.LeafNode($"Cast time: {data.CastTime:f1}");
+            tree.LeafNode($"施法者 ID: {OIDListString(data.CasterOIDs)}");
+            tree.LeafNode($"目标 ID: {OIDListString(data.TargetOIDs)}");
+            tree.LeafNode($"目标:{JoinStrings(ActionTargetStrings(data))}");
+            tree.LeafNode($"施法时间: {data.CastTime:f1}");
             if (aid.Type == ActionType.Spell)
             {
-                foreach (var n in tree.Node("Lumina data"))
+                foreach (var n in tree.Node("Lumina 数据"))
                 {
                     var row = Service.LuminaRow<Lumina.Excel.Sheets.Action>(aid.ID);
-                    tree.LeafNode($"Category: {row?.ActionCategory.ValueNullable?.Name}");
-                    tree.LeafNode($"Cast time: {row?.Cast100ms * 0.1f:f1} + {row?.ExtraCastTime100ms * 0.1f:f1}");
-                    tree.LeafNode($"Target range: {row?.Range}");
-                    tree.LeafNode($"Effect shape: {row?.CastType} ({(row != null ? DescribeShape(row.Value) : "")})");
-                    tree.LeafNode($"Effect range: {row?.EffectRange}");
-                    tree.LeafNode($"Effect width: {row?.XAxisModifier}");
-                    tree.LeafNode($"Omen: {row?.Omen.ValueNullable?.Path} / {row?.Omen.ValueNullable?.PathAlly}");
+                    tree.LeafNode($"类别: {row?.ActionCategory.ValueNullable?.Name}");
+                    tree.LeafNode($"施法时间: {row?.Cast100ms * 0.1f:f1} + {row?.ExtraCastTime100ms * 0.1f:f1}");
+                    tree.LeafNode($"目标范围: {row?.Range}");
+                    tree.LeafNode($"效果形状: {row?.CastType} ({(row != null ? DescribeShape(row.Value) : "")})");
+                    tree.LeafNode($"效果范围: {row?.EffectRange}");
+                    tree.LeafNode($"效果宽度: {row?.XAxisModifier}");
+                    tree.LeafNode($"预警: {row?.Omen.ValueNullable?.Path} / {row?.Omen.ValueNullable?.PathAlly}");
                     var omenAlt = row != null ? Service.LuminaRow<Lumina.Excel.Sheets.Omen>(row.Value.OmenAlt.RowId) : null;
-                    tree.LeafNode($"Omen alt: {omenAlt?.Path} / {omenAlt?.PathAlly}");
+                    tree.LeafNode($"预警(备选): {omenAlt?.Path} / {omenAlt?.PathAlly}");
                 }
             }
-            foreach (var n in tree.Node("Instances", data.Instances.Count == 0))
+            foreach (var n in tree.Node("实例", data.Instances.Count == 0))
             {
-                foreach (var an in tree.Nodes(data.Instances, inst => new($"{inst.TimestampString()}: {ReplayUtils.ParticipantPosRotString(inst.Action.Source, inst.Action.Timestamp)} -> {ReplayUtils.ParticipantString(inst.Action.MainTarget, inst.Action.Timestamp)} {Utils.Vec3String(inst.Action.TargetPos)} / {inst.Action.Rotation} ({inst.Action.Targets.Count} affected)", inst.Action.Targets.Count == 0)))
+                foreach (var an in tree.Nodes(data.Instances, inst => new($"{inst.TimestampString()}: {ReplayUtils.ParticipantPosRotString(inst.Action.Source, inst.Action.Timestamp)} -> {ReplayUtils.ParticipantString(inst.Action.MainTarget, inst.Action.Timestamp)} {Utils.Vec3String(inst.Action.TargetPos)} / {inst.Action.Rotation} ({inst.Action.Targets.Count} 个受影响)", inst.Action.Targets.Count == 0)))
                 {
                     foreach (var tn in tree.Nodes(an.Action.Targets, t => new(ReplayUtils.ActionTargetString(t, an.Action.Timestamp))))
                     {
@@ -586,11 +586,11 @@ sealed class AbilityInfo : CommonEnumInfo
                     }
                 }
             }
-            foreach (var n in tree.Node("Casts", data.Casts.Count == 0))
+            foreach (var n in tree.Node("施法", data.Casts.Count == 0))
             {
                 if (ImGui.BeginPopupContextItem("casts-ctx"))
                 {
-                    if (ImGui.MenuItem("Copy (WPos, Angle) array"))
+                    if (ImGui.MenuItem("复制 (WPos, Angle) 数组"))
                     {
                         data.Casts.Sort(static (a, b) => a.Item3.Time.Start.CompareTo(b.Item3.Time.Start));
                         var inv = CultureInfo.InvariantCulture;
@@ -614,62 +614,62 @@ sealed class AbilityInfo : CommonEnumInfo
                 }
                 tree.LeafNodes(data.Casts, c => $"{c.Item1.Path} @ {c.Item3.Time.Start:O} + {c.Item3.Time.Duration:f3}/{c.Item3.ExpectedCastTime:f3}: {ReplayUtils.ParticipantString(c.Item2, c.Item3.Time.Start)} / {c.Item3.Rotation} -> {ReplayUtils.ParticipantPosRotString(c.Item3.Target, c.Item3.Time.Start)} / {Utils.Vec3String(c.Item3.Location)}");
             }
-            foreach (var an in tree.Node("Source position analysis"))
+            foreach (var an in tree.Node("来源位置分析"))
             {
                 data.SrcPosAnalysis ??= new(data.Instances);
                 data.SrcPosAnalysis.Draw();
             }
-            foreach (var an in tree.Node("Cone analysis (origin & rotation at source)"))
+            foreach (var an in tree.Node("扇形分析（原点与朝向取来源）"))
             {
                 data.ConeAnalysisSourcePosRot ??= new(data.Instances, ConeAnalysis.Targeting.SourcePosRot);
                 data.ConeAnalysisSourcePosRot.Draw();
             }
-            foreach (var an in tree.Node("Cone analysis (origin at target, rotation from source)"))
+            foreach (var an in tree.Node("扇形分析（原点取目标，朝向取来源）"))
             {
                 data.ConeAnalysisTargetPosSourceRot ??= new(data.Instances, ConeAnalysis.Targeting.TargetPosSourceRot);
                 data.ConeAnalysisTargetPosSourceRot.Draw();
             }
-            foreach (var an in tree.Node("Cone analysis (origin at source, directed at target)"))
+            foreach (var an in tree.Node("扇形分析（原点取来源，指向目标）"))
             {
                 data.ConeAnalysisSourcePosDirToTarget ??= new(data.Instances, ConeAnalysis.Targeting.SourcePosDirToTarget);
                 data.ConeAnalysisSourcePosDirToTarget.Draw();
             }
-            foreach (var an in tree.Node("Rect analysis (rotation from action)"))
+            foreach (var an in tree.Node("矩形分析（朝向取动作）"))
             {
                 data.RectAnalysisActionRot ??= new(data.Instances, true);
                 data.RectAnalysisActionRot.Draw();
             }
-            foreach (var an in tree.Node("Rect analysis (rotation from source)"))
+            foreach (var an in tree.Node("矩形分析（朝向取来源）"))
             {
                 data.RectAnalysisSourceRot ??= new(data.Instances, false);
                 data.RectAnalysisSourceRot.Draw();
             }
-            foreach (var an in tree.Node("Damage falloff analysis (by distance)"))
+            foreach (var an in tree.Node("伤害衰减分析（按距离）"))
             {
                 data.DamageFalloffAnalysisDist ??= new(data.Instances, false, false);
                 data.DamageFalloffAnalysisDist.Draw();
             }
-            foreach (var an in tree.Node("Damage falloff analysis (by distance from source)"))
+            foreach (var an in tree.Node("伤害衰减分析（按与来源距离）"))
             {
                 data.DamageFalloffAnalysisDistFromSource ??= new(data.Instances, false, true);
                 data.DamageFalloffAnalysisDistFromSource.Draw();
             }
-            foreach (var an in tree.Node("Damage falloff analysis (by max coord)"))
+            foreach (var an in tree.Node("伤害衰减分析（按最大坐标）"))
             {
                 data.DamageFalloffAnalysisMinCoord ??= new(data.Instances, true, false);
                 data.DamageFalloffAnalysisMinCoord.Draw();
             }
-            foreach (var an in tree.Node("Gaze analysis"))
+            foreach (var an in tree.Node("目视分析"))
             {
                 data.GazeAnalysis ??= new(data.Instances);
                 data.GazeAnalysis.Draw();
             }
-            foreach (var an in tree.Node("Knockback analysis"))
+            foreach (var an in tree.Node("击退分析"))
             {
                 data.KnockbackAnalysis ??= new(data.Instances);
                 data.KnockbackAnalysis.Draw(tree);
             }
-            foreach (var an in tree.Node("Caster link analysis"))
+            foreach (var an in tree.Node("施法者连线分析"))
             {
                 data.CasterLinkAnalysis ??= new(data.Instances);
                 data.CasterLinkAnalysis.Draw(tree);
@@ -679,7 +679,7 @@ sealed class AbilityInfo : CommonEnumInfo
 
     public void DrawContextMenu()
     {
-        if (ImGui.MenuItem("Generate enum for boss module"))
+        if (ImGui.MenuItem("为 BOSS 模块生成枚举"))
         {
             var enumPairs = new List<(string, string)>(_data.Count);
             foreach (var d in _data)
@@ -697,7 +697,7 @@ sealed class AbilityInfo : CommonEnumInfo
             ImGui.SetClipboardText(sb.ToString());
         }
 
-        if (ImGui.MenuItem("Generate missing enum values for boss module"))
+        if (ImGui.MenuItem("为 BOSS 模块生成缺失枚举值"))
         {
             var missingPairs = new List<(string, string)>();
             foreach (var kv in _data)
@@ -787,17 +787,17 @@ sealed class AbilityInfo : CommonEnumInfo
     {
         if (data.SeenTargetSelf)
         {
-            yield return "self";
+            yield return "自身";
         }
 
         if (data.SeenTargetPlayer)
         {
-            yield return data.SeenAOE ? "players" : "player";
+            yield return data.SeenAOE ? "玩家们" : "玩家";
         }
 
         if (data.SeenTargetLocation)
         {
-            yield return "location";
+            yield return "位置";
         }
 
         if (data.SeenTargetOtherEnemy)

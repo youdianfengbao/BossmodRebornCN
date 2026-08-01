@@ -24,8 +24,8 @@ public sealed class ColumnPlayerActions : Timeline.ColumnGroup
     public ColumnPlayerActions(Timeline timeline, StateMachineTree tree, List<int> phaseBranches, Replay replay, Replay.Encounter enc, Replay.Participant player, Class playerClass)
         : base(timeline)
     {
-        _autoAttacks = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "Auto attacks"));
-        _animLocks = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "Abilities with animation locks"));
+        _autoAttacks = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "自动攻击"));
+        _animLocks = Add<ColumnGenericHistory>(new(timeline, tree, phaseBranches, "有动画锁的技能"));
         _sep = Add(new ColumnSeparator(timeline));
         GetCooldownColumn(ActionDefinitions.GCDGroup, new()).Name = "GCD"; // make sure GCD column always exists and is before any others
         SetupClass(playerClass);
@@ -113,7 +113,7 @@ public sealed class ColumnPlayerActions : Timeline.ColumnGroup
                                 var duration = (float)((status?.Time.End ?? a.Timestamp) - a.Timestamp).TotalSeconds;
                                 var delay = ((status?.Time.Start ?? a.Timestamp) - a.Timestamp).TotalSeconds;
                                 effectDuration = Math.Max(effectDuration, duration);
-                                effectTooltip.Add($"- effect: {Utils.StatusString(eff.Value)}, duration={(status != null ? status.Time : "???")}s, start-delay={delay:f3}s");
+                                effectTooltip.Add($"- 效果: {Utils.StatusString(eff.Value)}, 持续={(status != null ? status.Time : "???")}s, 开始延迟={delay:f3}s");
                             }
                         }
                     }
@@ -155,7 +155,7 @@ public sealed class ColumnPlayerActions : Timeline.ColumnGroup
                         }
                     }
                 }
-                data.Column?.AddHistoryEntryDot(enc.Time.Start, a.Timestamp, $"CD reduced by {actualReduction:f1}/{cdr.cd:f1}s: {actionName}", actualReduction < cdr.cd ? Colors.TextColor2 : Colors.TextColor11).AddActionTooltip(a);
+                data.Column?.AddHistoryEntryDot(enc.Time.Start, a.Timestamp, $"冷却缩减 {actualReduction:f1}/{cdr.cd:f1}s: {actionName}", actualReduction < cdr.cd ? Colors.TextColor2 : Colors.TextColor11).AddActionTooltip(a);
             }
         }
 
@@ -177,7 +177,7 @@ public sealed class ColumnPlayerActions : Timeline.ColumnGroup
 
     public void DrawConfig(UITree tree)
     {
-        if (ImGui.Button("Show all"))
+        if (ImGui.Button("全部显示"))
         {
             foreach (var col in Columns)
             {
@@ -186,7 +186,7 @@ public sealed class ColumnPlayerActions : Timeline.ColumnGroup
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Hide all"))
+        if (ImGui.Button("全部隐藏"))
         {
             foreach (var col in Columns)
             {
@@ -230,7 +230,7 @@ public sealed class ColumnPlayerActions : Timeline.ColumnGroup
 
     private void AddUnfinishedCast(Replay.Cast cast, DateTime encStart)
     {
-        var name = $"[unfinished] {cast.ID} -> {ReplayUtils.ParticipantString(cast.Target, cast.Time.Start)}";
+        var name = $"[未完成] {cast.ID} -> {ReplayUtils.ParticipantString(cast.Target, cast.Time.Start)}";
         _animLocks.AddHistoryEntryRange(encStart, cast.Time, name, Colors.TextColor12).AddCastTooltip(cast);
 
         var castActionDef = ActionDefinitions.Instance[cast.ID];
@@ -250,7 +250,7 @@ public sealed class ColumnPlayerActions : Timeline.ColumnGroup
             e.TooltipExtra = (res, t) =>
             {
                 var elapsed = t - (lockStart - encStart).TotalSeconds;
-                res.Add($"- anim lock: {action.AnimationLock - elapsed:f3} / {action.AnimationLock:f3}");
+                res.Add($"- 动画锁定: {action.AnimationLock - elapsed:f3} / {action.AnimationLock:f3}");
             };
         }
     }
@@ -276,9 +276,9 @@ public sealed class ColumnPlayerActions : Timeline.ColumnGroup
         var e = data.Column.AddHistoryEntryRange(encStart, data.Cursor, rangeEnd, data.CooldownAction.ToString(), Colors.TextColor7, width);
         e.TooltipExtra = (res, t) =>
         {
-            res.Add($"- remaining: {(chargeCooldownEnd - encStart).TotalSeconds - t:f3}s / {chargeCooldown:f3}s ({maxCharges - chargesOnCooldown}/{maxCharges} charges)");
-            res.Add($"- start CD: {startCD:f3}s / {chargeCooldown:f3}s");
-            res.Add($"- end CD: {endCD:f3}s / {chargeCooldown:f3}s");
+            res.Add($"- 剩余: {(chargeCooldownEnd - encStart).TotalSeconds - t:f3}s / {chargeCooldown:f3}s ({maxCharges - chargesOnCooldown}/{maxCharges} 层)");
+            res.Add($"- 开始冷却: {startCD:f3}s / {chargeCooldown:f3}s");
+            res.Add($"- 结束冷却: {endCD:f3}s / {chargeCooldown:f3}s");
         };
     }
 
@@ -336,7 +336,7 @@ public sealed class ColumnPlayerActions : Timeline.ColumnGroup
             // already at max charges, assume previous cooldown is slightly smaller than expected
             var deficit = (data.ChargeCooldownEnd - data.Cursor).TotalSeconds;
             var e = data.Column!.AddHistoryEntryLine(encStart, timestamp, aid.ToString(), Colors.TextColor1);
-            e.TooltipExtra = (res, _) => res.Add($"- cooldown {deficit:f1}s smaller than expected");
+            e.TooltipExtra = (res, _) => res.Add($"- 冷却比预期短 {deficit:f1}s");
             data.ChargeCooldownEnd = data.Cursor.AddSeconds(actionDef.Cooldown);
         }
         data.ChargeCooldown = actionDef.Cooldown;

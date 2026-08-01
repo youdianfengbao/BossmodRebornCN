@@ -17,7 +17,7 @@ sealed class ReplayTimelineWindow : UIWindow
     private readonly ColumnPlayersDetails _colPlayers;
     private readonly UITree _configTree = new();
 
-    public ReplayTimelineWindow(Replay replay, Replay.Encounter enc, BitMask showPlayers, PlanDatabase planDB, ReplayDetailsWindow timelineSync) : base($"Replay timeline: {replay.Path} @ {enc.Time.Start:O}", true, new(1600, 1000))
+    public ReplayTimelineWindow(Replay replay, Replay.Encounter enc, BitMask showPlayers, PlanDatabase planDB, ReplayDetailsWindow timelineSync) : base($"回放时间轴: {replay.Path} @ {enc.Time.Start:O}", true, new(1600, 1000))
     {
         _encounter = enc;
         _timelineSync = timelineSync;
@@ -36,12 +36,12 @@ sealed class ReplayTimelineWindow : UIWindow
 
     public override void Draw()
     {
-        if (ImGui.Button("Config"))
+        if (ImGui.Button("设置"))
         {
             ImGui.OpenPopup("config");
         }
         ImGui.SameLine();
-        if (ImGui.Button($"Save {(_colPlayers.AnyPlanModified ? "all changes" : "(no changes)")}"))
+        if (ImGui.Button($"保存 {(_colPlayers.AnyPlanModified ? "全部更改" : "(无更改)")}"))
         {
             _colPlayers.SaveAll();
         }
@@ -63,18 +63,18 @@ sealed class ReplayTimelineWindow : UIWindow
 
     private void DrawConfig()
     {
-        UICombo.Enum("State text", ref _colStates.TextDisplay);
-        foreach (var _ in _configTree.Node("Enemy casts columns"))
+        UICombo.Enum("状态文本", ref _colStates.TextDisplay);
+        foreach (var _ in _configTree.Node("敌人施法列"))
         {
             _colCastEvents.DrawConfig(_configTree);
         }
 
-        foreach (var n in _configTree.Node("Enemy details"))
+        foreach (var n in _configTree.Node("敌人详情"))
         {
             _colEnemies.DrawConfig(_configTree);
         }
 
-        foreach (var n in _configTree.Node("Player details"))
+        foreach (var n in _configTree.Node("玩家详情"))
         {
             _colPlayers.DrawConfig(_configTree);
         }

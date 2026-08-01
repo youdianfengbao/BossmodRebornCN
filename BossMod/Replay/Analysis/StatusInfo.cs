@@ -51,10 +51,10 @@ sealed class StatusInfo : CommonEnumInfo
         }
         foreach (var (sid, data) in tree.Nodes(_data, map))
         {
-            tree.LeafNode($"Source IDs: {OIDListString(data.SourceOIDs)}");
-            tree.LeafNode($"Target IDs: {OIDListString(data.TargetOIDs)}");
-            tree.LeafNode($"Extras: {string.Join(", ", data.Extras.Select(extra => $"{extra:X}"))}");
-            foreach (var n in tree.Node($"Instances ({data.Instances.Count})###instances"))
+            tree.LeafNode($"来源 ID: {OIDListString(data.SourceOIDs)}");
+            tree.LeafNode($"目标 ID: {OIDListString(data.TargetOIDs)}");
+            tree.LeafNode($"附加: {string.Join(", ", data.Extras.Select(extra => $"{extra:X}"))}");
+            foreach (var n in tree.Node($"实例 ({data.Instances.Count})###instances"))
             {
                 tree.LeafNodes(data.Instances, i => $"{i.Replay.Path} @ {i.Status.Time.Start}: at {ReplayUtils.ParticipantString(i.Status.Target, i.Status.Time.Start)}");
             }
@@ -63,7 +63,7 @@ sealed class StatusInfo : CommonEnumInfo
 
     public void DrawContextMenu()
     {
-        if (ImGui.MenuItem("Generate enum for boss module"))
+        if (ImGui.MenuItem("为 BOSS 模块生成枚举"))
         {
             var sb = new StringBuilder("public enum SID : uint\n{\n");
             foreach (var (sid, data) in _data)
@@ -75,7 +75,7 @@ sealed class StatusInfo : CommonEnumInfo
             ImGui.SetClipboardText(sb.ToString());
         }
 
-        if (ImGui.MenuItem("Generate missing enum values for boss module"))
+        if (ImGui.MenuItem("为 BOSS 模块生成缺失枚举值"))
         {
             var sb = new StringBuilder();
             foreach (var (sid, data) in _data.Where(kv => _sidType?.GetEnumName(kv.Key) == null))

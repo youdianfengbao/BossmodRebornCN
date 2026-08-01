@@ -51,7 +51,7 @@ public sealed class ColumnEnemiesDetails : Timeline.ColumnGroup
                 {
                     c.DrawConfig(tree);
                 }
-                else if (ImGui.Button($"Show details for {ReplayUtils.ParticipantString(p, p.WorldExistence.FirstOrDefault().Start)}"))
+                else if (ImGui.Button($"显示详情: {ReplayUtils.ParticipantString(p, p.WorldExistence.FirstOrDefault().Start)}"))
                 {
                     n.Columns[i] = (p, Add(new ColumnEnemyDetails(Timeline, _tree, _phaseBranches, _replay, _encounter, p)));
                 }

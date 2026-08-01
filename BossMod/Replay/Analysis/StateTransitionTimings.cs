@@ -85,15 +85,15 @@ sealed class StateTransitionTimings
     public void Draw(UITree tree)
     {
         Action? actions = null;
-        ImGui.Checkbox("Show transitions to end", ref _showTransitionsToEnd);
-        foreach (var n in tree.Node("Encounters", _encounters.Count == 0))
+        ImGui.Checkbox("显示到结束的转换", ref _showTransitionsToEnd);
+        foreach (var n in tree.Node("战斗", _encounters.Count == 0))
         {
             tree.LeafNodes(_encounters, e => $"{e.Item1.Path} @ {e.Item2.Time.Start:O} ({e.Item2.Time.Duration:f3}s)", e => EncounterContextMenu(e.Item2, ref actions));
         }
 
-        foreach (var n in tree.Node("Errors", _errors.Count == 0))
+        foreach (var n in tree.Node("错误", _errors.Count == 0))
         {
-            ImGui.InputFloat("Last seconds to ignore", ref _lastSecondsToIgnore);
+            ImGui.InputFloat("忽略最后 N 秒", ref _lastSecondsToIgnore);
             tree.LeafNodes(_errors.Where(e => (e.Item2.Time.End - e.Item3.Timestamp).TotalSeconds >= _lastSecondsToIgnore), error => $"{LocationString(error.Item1, error.Item2, error.Item3.Timestamp)} [{error.Item3.CompType}] {error.Item3.Message}");
         }
 
@@ -101,11 +101,11 @@ sealed class StateTransitionTimings
         {
             UITree.NodeProperties map(KeyValuePair<uint, TransitionMetrics> kv)
             {
-                var destName = kv.Key != uint.MaxValue ? _metrics.GetValueOrDefault(kv.Key)?.Name ?? $"{kv.Key:X} ???" : "<end>";
+                var destName = kv.Key != uint.MaxValue ? _metrics.GetValueOrDefault(kv.Key)?.Name ?? $"{kv.Key:X} ???" : "<结束>";
                 var name = $"{from.Name} -> {destName}";
                 var value = kv.Value.Instances.Count > 0
-                    ? $"avg={kv.Value.AvgTime:f2}-{from.ExpectedTime:f2}={kv.Value.AvgTime - from.ExpectedTime:f2} +- {kv.Value.StdDev:f2}, [{kv.Value.MinTime:f2}, {kv.Value.MaxTime:f2}] range, {kv.Value.Instances.Count} seen"
-                    : $"never seen ({from.ExpectedTime:f2} expected)";
+                    ? $"平均={kv.Value.AvgTime:f2}-{from.ExpectedTime:f2}={kv.Value.AvgTime - from.ExpectedTime:f2} +- {kv.Value.StdDev:f2}, 范围 [{kv.Value.MinTime:f2}, {kv.Value.MaxTime:f2}], 出现 {kv.Value.Instances.Count} 次"
+                    : $"从未出现 (预期 {from.ExpectedTime:f2})";
                 var color = !kv.Value.Expected ? Colors.TextColor5
                     : kv.Value.Instances.Count > 0 && Math.Abs(from.ExpectedTime - kv.Value.AvgTime) > Math.Ceiling(kv.Value.StdDev * 10) / 10 ? Colors.TextColor2
                     : Colors.TextColor1;
@@ -151,7 +151,7 @@ sealed class StateTransitionTimings
 
     private void EncounterContextMenu(Replay.Encounter enc, ref Action? actions)
     {
-        if (ImGui.MenuItem("Ignore this encounter"))
+        if (ImGui.MenuItem("忽略此战斗"))
         {
             actions += () =>
             {
@@ -173,7 +173,7 @@ sealed class StateTransitionTimings
 
     private void TransitionContextMenu(StateMetrics state, uint to, TransitionMetrics trans, UITree tree, ref Action? actions)
     {
-        if (ImGui.MenuItem("Ignore this transition"))
+        if (ImGui.MenuItem("忽略此转换"))
         {
             actions += () =>
             {
@@ -185,7 +185,7 @@ sealed class StateTransitionTimings
                 state.Transitions.Remove(to);
             };
         }
-        if (_selected is TransitionMetrics dest && trans != dest && ImGui.MenuItem("Merge to selected transition"))
+        if (_selected is TransitionMetrics dest && trans != dest && ImGui.MenuItem("合并到所选转换"))
         {
             dest.Instances.AddRange(trans.Instances);
             RecalculateMetrics(dest);
@@ -197,7 +197,7 @@ sealed class StateTransitionTimings
 
     private void TransitionInstanceContextMenu(StateMetrics state, uint to, TransitionMetrics trans, TransitionMetric metric, ref Action? actions)
     {
-        if (ImGui.MenuItem("Ignore this instance"))
+        if (ImGui.MenuItem("忽略此实例"))
         {
             actions += () =>
             {

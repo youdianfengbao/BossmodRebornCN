@@ -45,8 +45,8 @@ public static class ColumnUtils
 
     public static void AddCastTooltip(List<string> tooltip, Replay.Cast cast)
     {
-        tooltip.Add($"- cast expected {cast.ExpectedCastTime:f2}, actual {cast.Time}");
-        tooltip.Add($"- target loc: {Utils.Vec3String(cast.Location)}, angle: {cast.Rotation}");
+        tooltip.Add($"- 施法预期 {cast.ExpectedCastTime:f2}, 实际 {cast.Time}");
+        tooltip.Add($"- 目标位置: {Utils.Vec3String(cast.Location)}, 角度: {cast.Rotation}");
     }
     public static void AddCastTooltip(this ColumnGenericHistory.Entry entry, Replay.Cast cast) => entry.TooltipExtra = (res, _) => AddCastTooltip(res, cast);
 

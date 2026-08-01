@@ -9,7 +9,7 @@ sealed class TetherInfo : CommonEnumInfo
     {
         public string TimestampString() => $"{Replay.Path} @ {Enc.Time.Start:O}+{(Tether.Time.Start - Enc.Time.Start).TotalSeconds:f4}";
 
-        public override string ToString() => $"{TimestampString()}: {ReplayUtils.ParticipantPosRotString(Tether.Source, Tether.Time.Start)} -> {ReplayUtils.ParticipantPosRotString(Tether.Target, Tether.Time.Start)}, active for {Tether.Time}s";
+        public override string ToString() => $"{TimestampString()}: {ReplayUtils.ParticipantPosRotString(Tether.Source, Tether.Time.Start)} -> {ReplayUtils.ParticipantPosRotString(Tether.Target, Tether.Time.Start)}, 持续 {Tether.Time}s";
     }
 
     class BreakAnalysis
@@ -90,14 +90,14 @@ sealed class TetherInfo : CommonEnumInfo
         }
         foreach (var (tid, data) in tree.Nodes(_data, map))
         {
-            tree.LeafNode($"Source IDs: {OIDListString(data.SourceOIDs)}");
-            tree.LeafNode($"Target IDs: {OIDListString(data.TargetOIDs)}");
-            tree.LeafNode($"VFX: {Service.LuminaRow<Channeling>(tid)?.File}");
-            foreach (var n in tree.Node("Instances", data.Instances.Count == 0))
+            tree.LeafNode($"来源 ID: {OIDListString(data.SourceOIDs)}");
+            tree.LeafNode($"目标 ID: {OIDListString(data.TargetOIDs)}");
+            tree.LeafNode($"特效: {Service.LuminaRow<Channeling>(tid)?.File}");
+            foreach (var n in tree.Node("实例", data.Instances.Count == 0))
             {
                 tree.LeafNodes(data.Instances, inst => inst.ToString());
             }
-            foreach (var an in tree.Node("Break distance analysis"))
+            foreach (var an in tree.Node("断裂距离分析"))
             {
                 data.BreakAnalysis ??= new(data.Instances);
                 data.BreakAnalysis.Draw();
@@ -107,7 +107,7 @@ sealed class TetherInfo : CommonEnumInfo
 
     public void DrawContextMenu()
     {
-        if (ImGui.MenuItem("Generate enum for boss module"))
+        if (ImGui.MenuItem("为 BOSS 模块生成枚举"))
         {
             var sb = new StringBuilder("public enum TetherID : uint\n{\n");
             foreach (var (tid, data) in _data)
@@ -119,7 +119,7 @@ sealed class TetherInfo : CommonEnumInfo
             ImGui.SetClipboardText(sb.ToString());
         }
 
-        if (ImGui.MenuItem("Generate missing enum values for boss module"))
+        if (ImGui.MenuItem("为 BOSS 模块生成缺失枚举值"))
         {
             var sb = new StringBuilder();
             foreach (var (tid, data) in _data.Where(kv => _tidType?.GetEnumName(kv.Key) == null))

@@ -38,7 +38,7 @@ public abstract class ColumnPlayerGauge : Timeline.ColumnGroup, IToggleableColum
     protected ColumnPlayerGauge(Timeline timeline, StateMachineTree tree, List<int> phaseBranches, Replay replay, Replay.Encounter enc, Replay.Participant player)
         : base(timeline)
     {
-        Name = "Gauge";
+        Name = "量表";
         Replay = replay;
         Encounter = enc;
     }
@@ -96,7 +96,7 @@ public sealed class ColumnPlayerGaugeWAR : ColumnPlayerGauge
     {
         if (gauge != 0 && to > from)
         {
-            _gauge.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{gauge} gauge", 0x80808080, gauge * 0.01f);
+            _gauge.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{gauge} 量值", 0x80808080, gauge * 0.01f);
         }
     }
 }
@@ -143,7 +143,7 @@ public sealed class ColumnPlayerGaugeGNB : ColumnPlayerGauge
         if (to > from)
         {
             var color = (gauge == 3) ? _colors.PlannerWindow[2] : (gauge == 2) ? new(0xFF90E0FF) : (gauge == 1) ? new(0xFFD6F5FF) : new(0x80808080);
-            _gauge.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{gauge} Cartridge{(gauge == 1 ? "" : "s")}", color.ABGR, gauge * 0.31f);
+            _gauge.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{gauge} 子弹", color.ABGR, gauge * 0.31f);
         }
     }
 }
@@ -192,15 +192,15 @@ public sealed class ColumnPlayerGaugeMNK : ColumnPlayerGauge
         : base(timeline, tree, phaseBranches, replay, enc, player)
     {
         _chakras = Add(new ColumnGenericHistory(timeline, tree, phaseBranches));
-        _chakras.Name = "Chakras";
+        _chakras.Name = "脉轮";
         _beast1 = Add(new ColumnGenericHistory(timeline, tree, phaseBranches));
-        _beast1.Name = "Beast Chakra 1";
+        _beast1.Name = "兽印 1";
         _beast2 = Add(new ColumnGenericHistory(timeline, tree, phaseBranches));
-        _beast2.Name = "Beast Chakra 2";
+        _beast2.Name = "兽印 2";
         _beast3 = Add(new ColumnGenericHistory(timeline, tree, phaseBranches));
-        _beast3.Name = "Beast Chakra 3";
+        _beast3.Name = "兽印 3";
         _nadi = Add(new ColumnGenericHistory(timeline, tree, phaseBranches));
-        _nadi.Name = "Nadi";
+        _nadi.Name = "日月脉";
         var prevChakras = 0;
         var prevBeast1 = default(BeastChakraType);
         var prevBeast2 = default(BeastChakraType);
@@ -369,7 +369,7 @@ public sealed class ColumnPlayerGaugeSAM : ColumnPlayerGauge
         if (Kenki != 0 && to > from)
         {
             var color = Kenki == 100 ? _colors.PlannerWindow[2] : new(0xFF90E0FF);
-            _kenki.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{Kenki} Kenki", color.ABGR, Kenki < 10 ? Kenki * 0.02f : Kenki * 0.01f);
+            _kenki.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{Kenki} 剑气", color.ABGR, Kenki < 10 ? Kenki * 0.02f : Kenki * 0.01f);
         }
     }
     private int GetSenCount(SenFlags sen)
@@ -405,7 +405,7 @@ public sealed class ColumnPlayerGaugeSAM : ColumnPlayerGauge
         if (mediStacks != 0 && to > from)
         {
             var color = mediStacks == 3 ? _colors.PlannerWindow[2] : new(0xFF8080FF);
-            _meditation.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{mediStacks} Meditation stack{(mediStacks == 1 ? "" : "s")}", color.ABGR, mediStacks * 0.31f);
+            _meditation.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{mediStacks} 层冥想", color.ABGR, mediStacks * 0.31f);
         }
     }
 }
@@ -474,13 +474,13 @@ public sealed class ColumnPlayerGaugeBRD : ColumnPlayerGauge
                 SongFlags.WanderersMinuet => (_colors.PlannerWindow[2], 0.25f),
                 _ => (new(0x80808080), 1),
             };
-            var e = _songs.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{song}, {repertoire} rep, {timer:f3} at start", color.ABGR, (1 + repertoire) * scale);
+            var e = _songs.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{song}, {repertoire} 层, 开始时 {timer:f3}", color.ABGR, (1 + repertoire) * scale);
             e.TooltipExtra = (res, t) =>
             {
                 var delta = t - (from - Encounter.Time.Start).TotalSeconds;
                 var remaining = timer - delta;
-                res.Add($"- time since start: {45 - remaining:f3}");
-                res.Add($"- remaining: {remaining:f3}");
+                res.Add($"- 开始后时间: {45 - remaining:f3}");
+                res.Add($"- 剩余: {remaining:f3}");
             };
         }
     }
@@ -489,7 +489,7 @@ public sealed class ColumnPlayerGaugeBRD : ColumnPlayerGauge
     {
         if (soulVoice != 0 && to > from)
         {
-            _soul.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{soulVoice} voice", 0x80808080, soulVoice * 0.01f);
+            _soul.AddHistoryEntryRange(Encounter.Time.Start, from, to, $"{soulVoice} 灵魂之声", 0x80808080, soulVoice * 0.01f);
         }
     }
 }
@@ -517,9 +517,9 @@ public sealed class ColumnPlayerGaugeMCH : ColumnPlayerGauge
         : base(timeline, tree, phaseBranches, replay, enc, player)
     {
         _heat = Add(new ColumnGenericHistory(timeline, tree, phaseBranches));
-        _heat.Name = "Heat";
+        _heat.Name = "热量";
         _battery = Add(new ColumnGenericHistory(timeline, tree, phaseBranches));
-        _battery.Name = "Battery";
+        _battery.Name = "电量";
 
         var prevHeat = 0;
         var prevBattery = 0;
@@ -550,8 +550,8 @@ public sealed class ColumnPlayerGaugeMCH : ColumnPlayerGauge
         {
             var color = (gauge == 100) ? _colors.PlannerWindow[2] : label switch
             {
-                "Heat" => new(0xFF90E0FF),
-                "Battery" => new(0xFFFFA500),
+                "热量" => new(0xFF90E0FF),
+                "电量" => new(0xFFFFA500),
                 _ => new(0x08080808)
             };
             var width = gauge < 10 ? gauge * 0.02f : gauge * 0.01f; //if Heat = 5, it will not show on Visualizer, instead showing as 0.. so here's a small hack-around to make it visible

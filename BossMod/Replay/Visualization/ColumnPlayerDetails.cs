@@ -67,22 +67,22 @@ public sealed class ColumnPlayerDetails : Timeline.ColumnGroup
     public void DrawConfig(UITree tree)
     {
         DrawConfigPlanner(tree);
-        foreach (var _1 in tree.Node("Actions"))
+        foreach (var _1 in tree.Node("动作"))
         {
             _actions.DrawConfig(tree);
         }
 
-        foreach (var _1 in tree.Node("Statuses"))
+        foreach (var _1 in tree.Node("状态"))
         {
             _statuses.DrawConfig(tree);
         }
 
-        foreach (var _1 in tree.Node("Resources"))
+        foreach (var _1 in tree.Node("资源"))
         {
             DrawResourceColumnToggle(_hp, "HP");
             if (_gauge != null)
             {
-                DrawResourceColumnToggle(_gauge, "Gauge");
+                DrawResourceColumnToggle(_gauge, "量表");
             }
         }
     }
@@ -101,11 +101,11 @@ public sealed class ColumnPlayerDetails : Timeline.ColumnGroup
     {
         if (_moduleInfo == null || _moduleInfo.PlanLevel <= 0)
         {
-            tree.LeafNode("Planner: not supported for this encounter");
+            tree.LeafNode("规划器：此战斗不支持");
             return;
         }
 
-        foreach (var _1 in tree.Node("Planner"))
+        foreach (var _1 in tree.Node("规划器"))
         {
             var plans = _planDatabase.GetPlans(_moduleInfo.ModuleType, _playerClass);
             UpdateSelectedPlan(plans, DrawPlanSelector(_moduleInfo.ModuleType, plans, _selectedPlan));
@@ -117,13 +117,13 @@ public sealed class ColumnPlayerDetails : Timeline.ColumnGroup
                 var haveDifferentPhaseTimes = false;
                 for (var i = 0; i < _tree.Phases.Count; ++i)
                 {
-                    _planner.Modified |= ImGui.SliderFloat($"{_tree.Phases[i].Name}###phase-duration-{i}", ref _planner.Plan.PhaseDurations.Ref(i), 0, _tree.Phases[i].MaxTime, $"%.1f (replay: {_tree.Phases[i].Duration:f1} / {_tree.Phases[i].MaxTime:f1})");
+                    _planner.Modified |= ImGui.SliderFloat($"{_tree.Phases[i].Name}###phase-duration-{i}", ref _planner.Plan.PhaseDurations.Ref(i), 0, _tree.Phases[i].MaxTime, $"%.1f (回放: {_tree.Phases[i].Duration:f1} / {_tree.Phases[i].MaxTime:f1})");
                     haveDifferentPhaseTimes |= _planner.Plan.PhaseDurations[i] != _tree.Phases[i].Duration;
                 }
 
                 using (ImRaii.Disabled(!haveDifferentPhaseTimes))
                 {
-                    if (ImGui.Button("Sync phase durations to replay"))
+                    if (ImGui.Button("将阶段时长同步到回放"))
                     {
                         for (var i = 0; i < _tree.Phases.Count; ++i)
                         {
@@ -146,19 +146,19 @@ public sealed class ColumnPlayerDetails : Timeline.ColumnGroup
 
         var isDefault = selection == list.SelectedIndex;
         ImGui.SameLine();
-        if (ImGui.Checkbox("Default", ref isDefault))
+        if (ImGui.Checkbox("默认", ref isDefault))
         {
             list.SelectedIndex = isDefault ? selection : -1;
             _planDatabase.ModifyManifest(moduleType, _playerClass);
         }
         ImGui.SameLine();
-        if (UIMisc.Button("Save", _planner == null || !_planner.Modified, "Current plan was not modified"))
+        if (UIMisc.Button("保存", _planner == null || !_planner.Modified, "当前方案未修改"))
         {
             SaveChanges();
         }
 
         ImGui.SameLine();
-        if (UIMisc.Button("Copy", _planner == null, "No plan selected") && _planner != null && _moduleInfo != null)
+        if (UIMisc.Button("复制", _planner == null, "未选择方案") && _planner != null && _moduleInfo != null)
         {
             _planner.Plan.Guid = Guid.NewGuid().ToString();
             _planner.Plan.Name += " Copy";
@@ -168,7 +168,7 @@ public sealed class ColumnPlayerDetails : Timeline.ColumnGroup
             _planner.Modified = false;
         }
         ImGui.SameLine();
-        if (UIMisc.Button("Revert", _planner == null || !_planner.Modified, "Current plan was not modified") && _planner != null && _moduleInfo != null)
+        if (UIMisc.Button("还原", _planner == null || !_planner.Modified, "当前方案未修改") && _planner != null && _moduleInfo != null)
         {
             var plans = _planDatabase.GetPlans(_moduleInfo.ModuleType, _playerClass);
             _planner.Plan = plans.Plans[_selectedPlan].MakeClone();
@@ -176,7 +176,7 @@ public sealed class ColumnPlayerDetails : Timeline.ColumnGroup
             _planner.Modified = false;
         }
         ImGui.SameLine();
-        if (UIMisc.Button("New", _planner != null && _planner.Modified, "Current preset is modified, save or discard changes") && _moduleInfo != null)
+        if (UIMisc.Button("新建", _planner != null && _planner.Modified, "当前方案已修改，请保存或放弃更改") && _moduleInfo != null)
         {
             var plans = _planDatabase.GetPlans(_moduleInfo.ModuleType, _playerClass);
             var plan = new Plan($"New {plans.Plans.Count + 1}", _moduleInfo.ModuleType) { Guid = Guid.NewGuid().ToString(), Class = _playerClass, Level = _moduleInfo.PlanLevel };
@@ -184,7 +184,7 @@ public sealed class ColumnPlayerDetails : Timeline.ColumnGroup
             selection = plans.Plans.Count - 1;
         }
         ImGui.SameLine();
-        if (UIMisc.Button("Delete", 0, (!ImGui.GetIO().KeyShift, "Hold shift to delete"), (_planner == null, "No preset is selected")) && _moduleInfo != null && _selectedPlan >= 0)
+        if (UIMisc.Button("删除", 0, (!ImGui.GetIO().KeyShift, "按住 Shift 删除"), (_planner == null, "未选择方案")) && _moduleInfo != null && _selectedPlan >= 0)
         {
             var plans = _planDatabase.GetPlans(_moduleInfo.ModuleType, _playerClass);
             _planDatabase.ModifyPlan(plans.Plans[_selectedPlan], null);

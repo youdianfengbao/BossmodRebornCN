@@ -81,7 +81,7 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
         if (!_nodesUpToDate)
         {
             RebuildNodes();
-            ImGui.Text($"Filtering...");
+            ImGui.Text($"过滤中...");
             return;
         }
 
@@ -230,43 +230,43 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
 
     private string OpName(WorldState.Operation o) => o switch
     {
-        ActorState.OpCreate op => $"Actor create: {ActorString(op.InstanceID, op.Timestamp)} #{op.SpawnIndex}",
-        ActorState.OpDestroy op => $"Actor destroy: {ActorString(op.InstanceID, op.Timestamp)}",
-        ActorState.OpRename op => $"Actor rename: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Name}",
-        ActorState.OpClassChange op => $"Actor class change: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Class} L{op.Level}",
-        ActorState.OpTargetable op => $"{(op.Value ? "Targetable" : "Untargetable")}: {ActorString(op.InstanceID, op.Timestamp)}",
-        ActorState.OpDead op => $"{(op.Value ? "Die" : "Resurrect")}: {ActorString(op.InstanceID, op.Timestamp)}",
-        ActorState.OpAggroPlayer op => $"Aggro player: {ActorString(op.InstanceID, op.Timestamp)} = {op.Has}",
-        ActorState.OpEventState op => $"Event state: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Value}",
-        ActorState.OpTarget op => $"Target: {ActorString(op.InstanceID, op.Timestamp)} -> {ActorString(op.Value, op.Timestamp)}",
-        ActorState.OpMount op => $"Mount: {ActorString(op.InstanceID, op.Timestamp)} = {Service.LuminaRow<Lumina.Excel.Sheets.Mount>(op.Value)?.Singular ?? "<unknown>"}",
-        ActorState.OpTether op => $"Tether: {ActorString(op.InstanceID, op.Timestamp)} {op.Value.ID} ({ModuleInfo?.TetherIDType?.GetEnumName(op.Value.ID)}) @ {ActorString(op.Value.Target, op.Timestamp)}",
-        ActorState.OpCastInfo op => $"Cast {(op.Value != null ? "started" : "ended")}: {CastString(op.InstanceID, op.Timestamp, op.Value != null)}",
-        ActorState.OpCastEvent op => $"Cast event: {ActorString(op.InstanceID, op.Timestamp)}: {op.Value.Action} ({ModuleInfo?.ActionIDType?.GetEnumName(op.Value.Action.ID)}) @ {CastEventTargetString(op.Value, op.Timestamp)} ({op.Value.Targets.Count} targets affected) #{op.Value.GlobalSequence}",
-        ActorState.OpStatus op => $"Status change: {ActorString(op.InstanceID, op.Timestamp)} #{op.Index}: {StatusesString(op.InstanceID, op.Index, op.Timestamp)}",
-        ActorState.OpIcon op => $"Icon: {ActorString(op.InstanceID, op.Timestamp)} -> {ActorString(op.TargetID, op.Timestamp)}: {op.IconID} ({ModuleInfo?.IconIDType?.GetEnumName(op.IconID)})",
-        ActorState.OpVFX op => $"VFX: {ActorString(op.InstanceID, op.Timestamp)} -> {ActorString(op.TargetID, op.Timestamp)}: {op.VfxID}",
-        ActorState.OpEventObjectStateChange op => $"EObjState: {ActorString(op.InstanceID, op.Timestamp)} = {op.State:X4}",
-        ActorState.OpEventObjectAnimation op => $"EObjAnim: {ActorString(op.InstanceID, op.Timestamp)} = {((uint)op.Param1 << 16) | op.Param2:X8}",
-        ActorState.OpPlayActionTimelineEvent op => $"Play action timeline: {ActorString(op.InstanceID, op.Timestamp)} = {op.ActionTimelineID:X4}",
-        ActorState.OpPlayActionTimelineSync op => $"Play action timeline multi: {ActorString(op.InstanceID, op.Timestamp)}",
-        ActorState.OpEventNpcYell op => $"Yell: {ActorString(op.InstanceID, op.Timestamp)} = {op.Message} '{Service.LuminaRow<Lumina.Excel.Sheets.NpcYell>(op.Message)?.Text}'",
-        ActorState.OpRenderflags op => $"Renderflag: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Value}",
-        ActorState.OpModelState op => $"Model state: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Value}",
-        ClientState.OpDutyActionsChange op => $"Player duty actions change: {string.Join(", ", op.Slots)}",
-        ClientState.OpBozjaHolsterChange op => $"Player bozja holster change: {GetOpBozjaHolsterChangeString(op.Contents)}",
-        ClientState.OpPlayerStatsChange op => $"Player stats: sks={op.Value.SkillSpeed}, sps={op.Value.SpellSpeed}, haste={op.Value.Haste}",
-        ClientState.OpBlueMageSpellsChange op => $"Player BLU spellbook: {GetOpBlueMageSpellsChangeString(op.Values)}",
-        ClientState.OpClassJobLevelsChange op => $"Player levels: {string.Join(", ", op.Values)}",
+        ActorState.OpCreate op => $"单位创建: {ActorString(op.InstanceID, op.Timestamp)} #{op.SpawnIndex}",
+        ActorState.OpDestroy op => $"单位销毁: {ActorString(op.InstanceID, op.Timestamp)}",
+        ActorState.OpRename op => $"单位改名: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Name}",
+        ActorState.OpClassChange op => $"单位职业变更: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Class} L{op.Level}",
+        ActorState.OpTargetable op => $"{(op.Value ? "可选中" : "不可选中")}: {ActorString(op.InstanceID, op.Timestamp)}",
+        ActorState.OpDead op => $"{(op.Value ? "死亡" : "复活")}: {ActorString(op.InstanceID, op.Timestamp)}",
+        ActorState.OpAggroPlayer op => $"仇恨玩家: {ActorString(op.InstanceID, op.Timestamp)} = {op.Has}",
+        ActorState.OpEventState op => $"事件状态: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Value}",
+        ActorState.OpTarget op => $"目标: {ActorString(op.InstanceID, op.Timestamp)} -> {ActorString(op.Value, op.Timestamp)}",
+        ActorState.OpMount op => $"坐骑: {ActorString(op.InstanceID, op.Timestamp)} = {Service.LuminaRow<Lumina.Excel.Sheets.Mount>(op.Value)?.Singular ?? "<未知>"}",
+        ActorState.OpTether op => $"连线: {ActorString(op.InstanceID, op.Timestamp)} {op.Value.ID} ({ModuleInfo?.TetherIDType?.GetEnumName(op.Value.ID)}) @ {ActorString(op.Value.Target, op.Timestamp)}",
+        ActorState.OpCastInfo op => $"施法{(op.Value != null ? "开始" : "结束")}: {CastString(op.InstanceID, op.Timestamp, op.Value != null)}",
+        ActorState.OpCastEvent op => $"施法事件: {ActorString(op.InstanceID, op.Timestamp)}: {op.Value.Action} ({ModuleInfo?.ActionIDType?.GetEnumName(op.Value.Action.ID)}) @ {CastEventTargetString(op.Value, op.Timestamp)} ({op.Value.Targets.Count} 个目标受影响) #{op.Value.GlobalSequence}",
+        ActorState.OpStatus op => $"状态变更: {ActorString(op.InstanceID, op.Timestamp)} #{op.Index}: {StatusesString(op.InstanceID, op.Index, op.Timestamp)}",
+        ActorState.OpIcon op => $"标记: {ActorString(op.InstanceID, op.Timestamp)} -> {ActorString(op.TargetID, op.Timestamp)}: {op.IconID} ({ModuleInfo?.IconIDType?.GetEnumName(op.IconID)})",
+        ActorState.OpVFX op => $"特效: {ActorString(op.InstanceID, op.Timestamp)} -> {ActorString(op.TargetID, op.Timestamp)}: {op.VfxID}",
+        ActorState.OpEventObjectStateChange op => $"EObj 状态: {ActorString(op.InstanceID, op.Timestamp)} = {op.State:X4}",
+        ActorState.OpEventObjectAnimation op => $"EObj 动画: {ActorString(op.InstanceID, op.Timestamp)} = {((uint)op.Param1 << 16) | op.Param2:X8}",
+        ActorState.OpPlayActionTimelineEvent op => $"播放动作时间轴: {ActorString(op.InstanceID, op.Timestamp)} = {op.ActionTimelineID:X4}",
+        ActorState.OpPlayActionTimelineSync op => $"播放动作时间轴(多人): {ActorString(op.InstanceID, op.Timestamp)}",
+        ActorState.OpEventNpcYell op => $"喊话: {ActorString(op.InstanceID, op.Timestamp)} = {op.Message} '{Service.LuminaRow<Lumina.Excel.Sheets.NpcYell>(op.Message)?.Text}'",
+        ActorState.OpRenderflags op => $"渲染标记: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Value}",
+        ActorState.OpModelState op => $"模型状态: {ActorString(op.InstanceID, op.Timestamp)} -> {op.Value}",
+        ClientState.OpDutyActionsChange op => $"玩家职能动作变更: {string.Join(", ", op.Slots)}",
+        ClientState.OpBozjaHolsterChange op => $"玩家博兹雅武装变更: {GetOpBozjaHolsterChangeString(op.Contents)}",
+        ClientState.OpPlayerStatsChange op => $"玩家属性: sks={op.Value.SkillSpeed}, sps={op.Value.SpellSpeed}, haste={op.Value.Haste}",
+        ClientState.OpBlueMageSpellsChange op => $"玩家青魔技能书: {GetOpBlueMageSpellsChangeString(op.Values)}",
+        ClientState.OpClassJobLevelsChange op => $"玩家等级: {string.Join(", ", op.Values)}",
         ClientState.OpActiveFateChange op => $"FATE: {op.Value.ID} '{Service.LuminaRow<Lumina.Excel.Sheets.Fate>(op.Value.ID)?.Name}' {op.Value.Progress}%",
-        ClientState.OpActivePetChange op => $"Player pet: {ActorString(op.Value.InstanceID, op.Timestamp)}",
+        ClientState.OpActivePetChange op => $"玩家宠物: {ActorString(op.Value.InstanceID, op.Timestamp)}",
         ClientState.OpInventoryChange op => ItemString(op),
-        PartyState.OpModify op => $"Party slot {op.Slot}: {op.Member.InstanceId:X8} {op.Member.Name}",
-        WorldState.OpMapEffect op => $"MapEffect: {op.Index:X2} {op.State:X8}",
-        WorldState.OpLegacyMapEffect op => $"MapEffect (legacy): seq={op.Sequence} param={op.Param} data={GetOpLegacyMapEffectString(op.Data)}",
-        WorldState.OpSystemLogMessage op => $"LogMessage {op.MessageID}: '{Service.LuminaRow<Lumina.Excel.Sheets.LogMessage>(op.MessageID)?.Text}' [{string.Join(", ", op.Args)}]",
-        WorldState.OpZoneChange op => $"Zone change: {op.Zone} ({Service.LuminaRow<Lumina.Excel.Sheets.TerritoryType>(op.Zone)?.PlaceName.Value.Name}) / {op.CFCID} ({(op.CFCID > 0 ? Service.LuminaRow<Lumina.Excel.Sheets.ContentFinderCondition>(op.CFCID)?.Name : "n/a")})",
-        WaymarkState.OpSignChange op => op.Target == 0 ? $"Sign: {op.ID} cleared" : $"Sign: {op.ID} on {ActorString(op.Target, op.Timestamp)}",
+        PartyState.OpModify op => $"队伍槽位 {op.Slot}: {op.Member.InstanceId:X8} {op.Member.Name}",
+        WorldState.OpMapEffect op => $"地图效果: {op.Index:X2} {op.State:X8}",
+        WorldState.OpLegacyMapEffect op => $"地图效果(旧版): seq={op.Sequence} param={op.Param} data={GetOpLegacyMapEffectString(op.Data)}",
+        WorldState.OpSystemLogMessage op => $"日志消息 {op.MessageID}: '{Service.LuminaRow<Lumina.Excel.Sheets.LogMessage>(op.MessageID)?.Text}' [{string.Join(", ", op.Args)}]",
+        WorldState.OpZoneChange op => $"区域变更: {op.Zone} ({Service.LuminaRow<Lumina.Excel.Sheets.TerritoryType>(op.Zone)?.PlaceName.Value.Name}) / {op.CFCID} ({(op.CFCID > 0 ? Service.LuminaRow<Lumina.Excel.Sheets.ContentFinderCondition>(op.CFCID)?.Name : "n/a")})",
+        WaymarkState.OpSignChange op => op.Target == 0 ? $"标志: {op.ID} 已清除" : $"标志: {op.ID} 位于 {ActorString(op.Target, op.Timestamp)}",
         _ => DumpOp(o)
     };
 
@@ -353,14 +353,14 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
                 ImGui.Separator();
             }
 
-            if (ImGui.MenuItem("Jump to timestamp", "double click"))
+            if (ImGui.MenuItem("跳转到时间戳", "双击"))
                 scrollTo(o.Timestamp);
         };
     }
 
     private void ContextMenuDirectorUpdate(WorldState.OpDirectorUpdate op)
     {
-        if (ImGui.MenuItem($"Filter out type {op.UpdateID:X8}"))
+        if (ImGui.MenuItem($"过滤掉类型 {op.UpdateID:X8}"))
         {
             _filteredDirectorUpdateTypes.Add(op.UpdateID);
             _nodesUpToDate = false;
@@ -370,7 +370,7 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
     private void ContextMenuActor(ActorState.Operation op)
     {
         var oid = replay.FindParticipant(op.InstanceID, op.Timestamp)!.OID;
-        if (ImGui.MenuItem($"Filter out OID {oid:X}"))
+        if (ImGui.MenuItem($"过滤掉 OID {oid:X}"))
         {
             _filteredOIDs.Add(oid);
             _nodesUpToDate = false;
@@ -382,7 +382,7 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
         ContextMenuActor(op);
         foreach (var s in FindStatuses(op.InstanceID, op.Index, op.Timestamp))
         {
-            if (ImGui.MenuItem($"Filter out {Utils.StatusString(s.ID)}"))
+            if (ImGui.MenuItem($"过滤掉 {Utils.StatusString(s.ID)}"))
             {
                 _filteredStatuses.Add(s.ID);
                 _nodesUpToDate = false;
@@ -394,7 +394,7 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
     {
         ContextMenuActor(op);
         var cast = FindCast(replay.FindParticipant(op.InstanceID, op.Timestamp), op.Timestamp, op.Value != null);
-        if (cast != null && ImGui.MenuItem($"Filter out {cast.ID}"))
+        if (cast != null && ImGui.MenuItem($"过滤掉 {cast.ID}"))
         {
             _filteredActions.Add(cast.ID);
             _nodesUpToDate = false;
@@ -404,7 +404,7 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
     private void ContextMenuEventCast(ActorState.OpCastEvent op)
     {
         ContextMenuActor(op);
-        if (ImGui.MenuItem($"Filter out {op.Value.Action}"))
+        if (ImGui.MenuItem($"过滤掉 {op.Value.Action}"))
         {
             _filteredActions.Add(op.Value.Action);
             _nodesUpToDate = false;
@@ -426,12 +426,12 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
     private Replay.Cast? FindCast(Replay.Participant? participant, DateTime timestamp, bool start) => participant?.Casts.Find(c => (start ? c.Time.Start : c.Time.End) == timestamp);
 
     private string ActorString(Replay.Participant? p, DateTime timestamp)
-        => p != null ? $"{ReplayUtils.ParticipantString(p, timestamp)} ({ModuleInfo?.ObjectIDType?.GetEnumName(p.OID)}) {Utils.PosRotString(p.PosRotAt(timestamp))}" : "<none>";
+        => p != null ? $"{ReplayUtils.ParticipantString(p, timestamp)} ({ModuleInfo?.ObjectIDType?.GetEnumName(p.OID)}) {Utils.PosRotString(p.PosRotAt(timestamp))}" : "<无>";
 
     private string ActorString(ulong instanceID, DateTime timestamp)
     {
         var p = replay.FindParticipant(instanceID, timestamp);
-        return p != null || instanceID == default ? ActorString(p, timestamp) : $"<unknown> {instanceID:X}";
+        return p != null || instanceID == default ? ActorString(p, timestamp) : $"<未知> {instanceID:X}";
     }
 
     private string CastEventTargetString(ActorCastEvent ev, DateTime timestamp) => $"{ActorString(ev.MainTargetID, timestamp)} / {Utils.Vec3String(ev.TargetPos)} / {ev.Rotation}";
@@ -442,10 +442,10 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
         var c = FindCast(p, timestamp, start);
         if (c == null)
         {
-            return $"{ActorString(p, timestamp)}: <unknown cast>";
+            return $"{ActorString(p, timestamp)}: <未知施法>";
         }
 
-        return $"{ActorString(p, timestamp)}: {c.ID} ({ModuleInfo?.ActionIDType?.GetEnumName(c.ID.ID)}), {c.ExpectedCastTime:f2}s ({c.Time} actual){(c.Interruptible ? " (interruptible)" : "")} @ {ReplayUtils.ParticipantPosRotString(c.Target, timestamp)} / {Utils.Vec3String(c.Location)} / {c.Rotation}";
+        return $"{ActorString(p, timestamp)}: {c.ID} ({ModuleInfo?.ActionIDType?.GetEnumName(c.ID.ID)}), 预期 {c.ExpectedCastTime:f2}s ({c.Time} 实际){(c.Interruptible ? " (可打断)" : "")} @ {ReplayUtils.ParticipantPosRotString(c.Target, timestamp)} / {Utils.Vec3String(c.Location)} / {c.Rotation}";
     }
 
     private string StatusesString(ulong instanceID, int index, DateTime timestamp)
@@ -455,12 +455,12 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
             var parts = new List<string>(2);
             if (s.Time.Start == timestamp)
             {
-                parts.Add("gain");
+                parts.Add("获得");
             }
 
             if (s.Time.End == timestamp)
             {
-                parts.Add("lose");
+                parts.Add("失去");
             }
 
             return string.Join("/", parts);
@@ -484,9 +484,9 @@ sealed class OpList(Replay replay, Replay.Encounter? enc, BossModuleRegistry.Inf
     {
         if (op.ItemId > 2000000)
         {
-            return $"Item quantity: {op.ItemId} '{Service.LuminaRow<Lumina.Excel.Sheets.EventItem>(op.ItemId)?.Name}' x{op.Quantity}";
+            return $"道具数量: {op.ItemId} '{Service.LuminaRow<Lumina.Excel.Sheets.EventItem>(op.ItemId)?.Name}' x{op.Quantity}";
         }
 
-        return $"Item quantity: {op.ItemId % 500000} '{Service.LuminaRow<Lumina.Excel.Sheets.Item>(op.ItemId % 500000)?.Name}' (hq={op.ItemId > 1000000}) x{op.Quantity}";
+        return $"道具数量: {op.ItemId % 500000} '{Service.LuminaRow<Lumina.Excel.Sheets.Item>(op.ItemId % 500000)?.Name}' (hq={op.ItemId > 1000000}) x{op.Quantity}";
     }
 }

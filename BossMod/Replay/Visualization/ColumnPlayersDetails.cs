@@ -42,7 +42,7 @@ public sealed class ColumnPlayersDetails : Timeline.ColumnGroup
                 {
                     col.DrawConfig(tree);
                 }
-                else if (ImGui.Button("Show details..."))
+                else if (ImGui.Button("显示详情..."))
                 {
                     _columns[i] = Add(new ColumnPlayerDetails(Timeline, _tree, _phaseBranches, _replay, _encounter, p, c, _planDB));
                 }

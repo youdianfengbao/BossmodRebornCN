@@ -28,9 +28,9 @@ public sealed class ColumnEnemyDetails : Timeline.ColumnGroup
     {
         foreach (var n in tree.Node(ReplayUtils.ParticipantString(_enemy, _enemy.WorldExistence.FirstOrDefault().Start)))
         {
-            DrawColumnToggle(_casts, "Casts");
+            DrawColumnToggle(_casts, "施法");
             DrawColumnToggle(_hp, "HP");
-            foreach (var _1 in tree.Node("Statuses"))
+            foreach (var _1 in tree.Node("状态"))
             {
                 _statuses.DrawConfig(tree);
             }

@@ -113,17 +113,17 @@ sealed class TEASpecific
 
     public void Draw(UITree tree)
     {
-        foreach (var _ in tree.Node("Hand of Prayer/Parting: bait range"))
+        foreach (var _ in tree.Node("祈祷之手/离别之手：引导范围"))
         {
             _plotHandBaits.Begin();
             foreach (var i in _handBaits)
             {
-                _plotHandBaits.Point(new Vector2(i.Distance, i.IsPrayer ? 2 : 1), i.IsPrayer ? Colors.TextColor2 : Colors.PlayerGeneric, () => $"{(i.IsPrayer ? "prayer" : "parting")} {i.Replay.Path} @ {i.Timestamp:O}");
+                _plotHandBaits.Point(new Vector2(i.Distance, i.IsPrayer ? 2 : 1), i.IsPrayer ? Colors.TextColor2 : Colors.PlayerGeneric, () => $"{(i.IsPrayer ? "祈祷" : "离别")} {i.Replay.Path} @ {i.Timestamp:O}");
             }
 
             _plotHandBaits.End();
         }
-        foreach (var _ in tree.Node("Hand of Parting: resolves damage"))
+        foreach (var _ in tree.Node("离别之手：结算伤害"))
         {
             _plotHandResolvesParting.Begin();
             foreach (var i in _handResolvesParting)
@@ -133,7 +133,7 @@ sealed class TEASpecific
 
             _plotHandResolvesParting.End();
         }
-        foreach (var _ in tree.Node("Hand of Prayer: resolves damage"))
+        foreach (var _ in tree.Node("祈祷之手：结算伤害"))
         {
             _plotHandResolvesPrayer.Begin();
             foreach (var i in _handResolvesPrayer)
@@ -143,7 +143,7 @@ sealed class TEASpecific
 
             _plotHandResolvesPrayer.End();
         }
-        foreach (var _ in tree.Node("Plaint of Surety: damage on close"))
+        foreach (var _ in tree.Node("笃行之诉：近处伤害"))
         {
             _plotSuretyResolvesClose.Begin();
             foreach (var i in _suretyResolvesClose)
@@ -153,7 +153,7 @@ sealed class TEASpecific
 
             _plotSuretyResolvesClose.End();
         }
-        foreach (var _ in tree.Node("Plaint of Surety: damage on far"))
+        foreach (var _ in tree.Node("笃行之诉：远处伤害"))
         {
             _plotSuretyResolvesFar.Begin();
             foreach (var i in _suretyResolvesFar)

@@ -36,7 +36,7 @@ public sealed class ColumnActorStatuses : Timeline.ColumnGroup
         foreach (ref var c in _columns.AsSpan())
         {
             var visible = c.col?.Width > 0;
-            if (ImGui.Checkbox($"{Utils.StatusString(c.sid)} from {ReplayUtils.ParticipantString(c.source, c.source?.WorldExistence.FirstOrDefault().Start ?? default)}", ref visible))
+            if (ImGui.Checkbox($"{Utils.StatusString(c.sid)} 来自 {ReplayUtils.ParticipantString(c.source, c.source?.WorldExistence.FirstOrDefault().Start ?? default)}", ref visible))
             {
                 c.col ??= BuildColumn(c.sid, c.source);
                 c.col.Width = visible ? ColumnGenericHistory.DefaultWidth : 0;
@@ -53,12 +53,12 @@ public sealed class ColumnActorStatuses : Timeline.ColumnGroup
         var minTime = _enc.Time.Start.AddSeconds(Timeline.MinTime);
         foreach (var s in _replay.Statuses.SkipWhile(s => s.Time.Start < minTime).TakeWhile(s => s.Time.Start <= _enc.Time.End).Where(s => s.ID == statusID && s.Source == source && s.Target == _target))
         {
-            var e = res.AddHistoryEntryRange(_enc.Time.Start, s.Time, $"{Utils.StatusString(statusID)} ({s.StartingExtra:X}) on {ReplayUtils.ParticipantString(_target, s.Time.Start)} from {ReplayUtils.ParticipantString(s.Source, s.Time.Start)}", 0x80808080);
+            var e = res.AddHistoryEntryRange(_enc.Time.Start, s.Time, $"{Utils.StatusString(statusID)} ({s.StartingExtra:X}) 施加于 {ReplayUtils.ParticipantString(_target, s.Time.Start)} 来源 {ReplayUtils.ParticipantString(s.Source, s.Time.Start)}", 0x80808080);
             e.TooltipExtra = (res, t) =>
             {
                 var elapsed = t - (s.Time.Start - _enc.Time.Start).TotalSeconds;
-                res.Add($"- remaining: {s.InitialDuration - elapsed:f3} / {s.InitialDuration:f3}");
-                res.Add($"- final duration: {s.InitialDuration - s.Time.Duration:f3}");
+                res.Add($"- 剩余: {s.InitialDuration - elapsed:f3} / {s.InitialDuration:f3}");
+                res.Add($"- 最终时长: {s.InitialDuration - s.Time.Duration:f3}");
             };
             if (s.Time.Start == prevEnd)
             {

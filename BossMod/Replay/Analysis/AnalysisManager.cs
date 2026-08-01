@@ -25,42 +25,42 @@ sealed class AnalysisManager : IDisposable
 
         public void Draw(UITree tree)
         {
-            foreach (var n in tree.Node("Unknown action effects"))
+            foreach (var n in tree.Node("未知动作效果"))
             {
                 _unkEffects.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Participant info", false, Colors.TextColor1, () => _participantInfo.Get().DrawContextMenu()))
+            foreach (var n in tree.Node("参与者信息", false, Colors.TextColor1, () => _participantInfo.Get().DrawContextMenu()))
             {
                 _participantInfo.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Ability info", false, Colors.TextColor1, () => _abilityInfo.Get().DrawContextMenu()))
+            foreach (var n in tree.Node("技能信息", false, Colors.TextColor1, () => _abilityInfo.Get().DrawContextMenu()))
             {
                 _abilityInfo.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Player class definitions"))
+            foreach (var n in tree.Node("玩家职业定义"))
             {
                 _classDefinitions.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Client action weirdness"))
+            foreach (var n in tree.Node("客户端动作异常"))
             {
                 _clientActions.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Effect results: missing confirmations"))
+            foreach (var n in tree.Node("效果结果：缺少确认"))
             {
                 _effectResultMissing.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Effect results: unexpected confirmations"))
+            foreach (var n in tree.Node("效果结果：意外确认"))
             {
                 _effectResultUnexpected.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Effect results: reorders"))
+            foreach (var n in tree.Node("效果结果：乱序"))
             {
                 _effectResultReorder.Get().Draw(tree);
             }
@@ -105,54 +105,54 @@ sealed class AnalysisManager : IDisposable
 
         public void Draw(UITree tree)
         {
-            foreach (var n in tree.Node("State transition timings"))
+            foreach (var n in tree.Node("状态转换时间"))
             {
                 _transitionTimings.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Participant info", false, Colors.TextColor1, () => _participantInfo.Get().DrawContextMenu()))
+            foreach (var n in tree.Node("参与者信息", false, Colors.TextColor1, () => _participantInfo.Get().DrawContextMenu()))
             {
                 _participantInfo.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Ability info", false, Colors.TextColor1, () => _abilityInfo.Get().DrawContextMenu()))
+            foreach (var n in tree.Node("技能信息", false, Colors.TextColor1, () => _abilityInfo.Get().DrawContextMenu()))
             {
                 _abilityInfo.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Status info", false, Colors.TextColor1, () => _statusInfo.Get().DrawContextMenu()))
+            foreach (var n in tree.Node("状态信息", false, Colors.TextColor1, () => _statusInfo.Get().DrawContextMenu()))
             {
                 _statusInfo.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Icon info", false, Colors.TextColor1, () => _iconInfo.Get().DrawContextMenu()))
+            foreach (var n in tree.Node("标记信息", false, Colors.TextColor1, () => _iconInfo.Get().DrawContextMenu()))
             {
                 _iconInfo.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Tether info", false, Colors.TextColor1, () => _tetherInfo.Get().DrawContextMenu()))
+            foreach (var n in tree.Node("连线信息", false, Colors.TextColor1, () => _tetherInfo.Get().DrawContextMenu()))
             {
                 _tetherInfo.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Map effect info", false, Colors.TextColor1))
+            foreach (var n in tree.Node("地图效果信息", false, Colors.TextColor1))
             {
                 _mapEffectInfo.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Director update info", false, Colors.TextColor1))
+            foreach (var n in tree.Node("演出控制更新信息", false, Colors.TextColor1))
             {
                 _directorInfo.Get().Draw(tree);
             }
 
-            foreach (var n in tree.Node("Arena bounds", false, Colors.TextColor1, () => _arenaBounds.Get().DrawContextMenu()))
+            foreach (var n in tree.Node("场地边界", false, Colors.TextColor1, () => _arenaBounds.Get().DrawContextMenu()))
             {
                 _arenaBounds.Get().Draw(tree);
             }
 
             if (_teaSpecific != null)
             {
-                foreach (var n in tree.Node("TEA-specific analysis"))
+                foreach (var n in tree.Node("TEA 专属分析"))
                 {
                     _teaSpecific.Get().Draw(tree);
                 }
@@ -160,7 +160,7 @@ sealed class AnalysisManager : IDisposable
 
             if (_topSpecific != null)
             {
-                foreach (var n in tree.Node("TOP-specific analysis"))
+                foreach (var n in tree.Node("TOP 专属分析"))
                 {
                     _topSpecific.Get().Draw(tree);
                 }
@@ -186,12 +186,12 @@ sealed class AnalysisManager : IDisposable
 
     public void Draw()
     {
-        ImGui.TextUnformatted($"{_replays.Count} logs found");
-        foreach (var n in _tree.Node("Global analysis"))
+        ImGui.TextUnformatted($"发现 {_replays.Count} 个日志");
+        foreach (var n in _tree.Node("全局分析"))
         {
             _global.Draw(_tree);
         }
-        foreach (var n in _tree.Nodes(_perEncounter, kv => new($"Encounter analysis for {kv.Key:X} ({BossModuleRegistry.FindByOID(kv.Key)?.ModuleType.Name})")))
+        foreach (var n in _tree.Nodes(_perEncounter, kv => new($"战斗分析: {kv.Key:X} ({BossModuleRegistry.FindByOID(kv.Key)?.ModuleType.Name})")))
         {
             n.Value.Draw(_tree);
         }
