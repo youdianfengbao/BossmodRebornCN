@@ -67,6 +67,19 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
     private readonly List<AOEInstance> _displayed = [];
     private readonly HashSet<uint> _seenSequences = [];
 
+    // Esoteric Instruction preview: the four Pallkeepers fire in the fixed tether order S->E->N->W,
+    // and the AoE type is decided by the keeper's position (N/S = bad breath cone aimed into the
+    // arena, E/W = plaincracker circle). Schedule all four at the instruction cast start instead of
+    // waiting for the 2.7s keeper casts, so the party gets a full 12-16s warning.
+    private static readonly WPos[] KeeperPos = [new(807f, -582f), new(827f, -562f), new(807f, -542f), new(787f, -562f)]; // S E N W
+    private readonly ulong[] _keeperIIDs = new ulong[4]; // instance ids in cast order: S E N W
+    private readonly int[] _keeperFinalDir = [0, 1, 2, 3]; // cast-order slot -> final position index after the polarity swap
+    private readonly HashSet<(ulong, ulong)> _swapPairs = [];
+    private ulong _bossID;
+    private DateTime _firstKeeperActivation;
+    private bool _reverse; // C26E: keepers swap positions, pairings delivered as TETH 207 during Reverse Polarity
+    private bool _swapApplied;
+
     private static AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
         (uint)AID.BadBreathInstruction or (uint)AID.BadBreathAOE => new(BadBreath),
@@ -100,22 +113,44 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (ConfigFor(spell.Action.ID) is not { } config || spell.EventHappened)
+        var aid = spell.Action.ID;
+        if ((aid is (uint)AID.EsotericInstruction or (uint)AID.EsotericInstructionReverse) && !spell.EventHappened)
+        {
+            _bossID = caster.InstanceID;
+            ScheduleKeeperPreview(Module.CastFinishAt(spell, aid == (uint)AID.EsotericInstruction ? 3.4f : 10.0f), aid == (uint)AID.EsotericInstructionReverse);
+            return;
+        }
+        if (aid == (uint)AID.ReversePolarity && !spell.EventHappened)
+        {
+            // The TETH 207 pairings usually arrive while this cast is running; apply them if already complete.
+            ApplySwapIfReady();
+            return;
+        }
+        if (ConfigFor(aid) is not { } config || spell.EventHappened)
             return;
 
         var activation = Module.CastFinishAt(spell);
         if (activation <= WorldState.CurrentTime)
             return;
 
-        _pending.RemoveAll(p => p.ActionID == spell.Action.ID && p.ActorID == caster.InstanceID);
         var origin = config.LocationTargeted ? spell.LocXZ : caster.Position;
-        _pending.Add(new(spell.Action.ID, caster.InstanceID, config.Shape, origin, spell.Rotation, activation, !config.LocationTargeted));
+        // Replace a pre-scheduled preview at the same spot with the precise cast packet (two keepers
+        // share the bad breath action, so match the preview's fixed position as well).
+        _pending.RemoveAll(p => p.ActionID == aid && (p.ActorID == caster.InstanceID
+            || p.ActorID == _bossID && (p.Origin - origin).LengthSq() < 1f));
+        _pending.Add(new(aid, caster.InstanceID, config.Shape, origin, spell.Rotation, activation, !config.LocationTargeted));
     }
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
         if (spell.EventHappened)
-            _pending.RemoveAll(p => p.ActionID == spell.Action.ID && p.ActorID == caster.InstanceID);
+        {
+            // Interrupted instruction: the keepers never fire, so drop the previews.
+            if (spell.Action.ID is (uint)AID.EsotericInstruction or (uint)AID.EsotericInstructionReverse)
+                _pending.RemoveAll(IsPreview);
+            else
+                _pending.RemoveAll(p => p.ActionID == spell.Action.ID && p.ActorID == caster.InstanceID);
+        }
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
@@ -128,6 +163,110 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
     }
 
     public override void OnActorDestroyed(Actor actor) => _pending.RemoveAll(p => p.ActorID == actor.InstanceID);
+
+    // During Reverse Polarity each pair of keepers connected by a TETH 207 tether trades positions;
+    // the AoE type follows the new position while the cast order stays the original S->E->N->W.
+    public override void OnTethered(Actor source, in ActorTetherInfo tether)
+    {
+        if (!_reverse || _swapApplied || tether.ID != 207)
+            return;
+        var (a, b) = source.InstanceID < tether.Target ? (source.InstanceID, tether.Target) : (tether.Target, source.InstanceID);
+        if (_swapPairs.Add((a, b)))
+            ApplySwapIfReady();
+    }
+
+    private void ScheduleKeeperPreview(DateTime firstActivation, bool reverse)
+    {
+        _reverse = reverse;
+        _swapApplied = false;
+        _swapPairs.Clear();
+        if (!CollectKeepers())
+            return; // keepers not fully resolved; the real cast packets will handle it
+        _firstKeeperActivation = firstActivation;
+        _pending.RemoveAll(IsPreview);
+        AddKeeperPreview(firstActivation);
+    }
+
+    private bool CollectKeepers()
+    {
+        for (var i = 0; i < 4; ++i)
+            _keeperIIDs[i] = 0;
+        foreach (var a in WorldState.Actors)
+        {
+            if (a.OID != (uint)OID.Pallkeeper)
+                continue;
+            var best = -1;
+            var bestDist = float.MaxValue;
+            for (var i = 0; i < 4; ++i)
+            {
+                var d = (a.Position - KeeperPos[i]).LengthSq();
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    best = i;
+                }
+            }
+            if (best >= 0)
+                _keeperIIDs[best] = a.InstanceID;
+        }
+        for (var i = 0; i < 4; ++i)
+            if (_keeperIIDs[i] == 0)
+                return false;
+        return true;
+    }
+
+    private void AddKeeperPreview(DateTime firstActivation)
+    {
+        for (var n = 0; n < 4; ++n)
+        {
+            var dir = _keeperFinalDir[n];
+            var pos = KeeperPos[dir];
+            var cone = dir is 0 or 2; // N/S positions always fire the bad breath cone
+            AOEShape shape = cone ? BadBreath : PlaincrackerLarge;
+            var rotation = cone ? Angle.FromDirection(Module.Arena.Center - pos) : default;
+            var aid = cone ? (uint)AID.BadBreathInstruction : (uint)AID.PlaincrackerInstruction;
+            _pending.Add(new(aid, _bossID, shape, pos, rotation, firstActivation.AddSeconds(4.5d * n), false));
+        }
+    }
+
+    private void ApplySwapIfReady()
+    {
+        if (!_reverse || _swapApplied || _swapPairs.Count < 2 || !KeepersKnown())
+            return;
+        for (var i = 0; i < 4; ++i)
+            _keeperFinalDir[i] = i;
+        foreach (var (a, b) in _swapPairs)
+        {
+            var da = IndexOfKeeper(a);
+            var db = IndexOfKeeper(b);
+            if (da < 0 || db < 0)
+                return;
+            _keeperFinalDir[da] = db;
+            _keeperFinalDir[db] = da;
+        }
+        _swapApplied = true;
+        _pending.RemoveAll(IsPreview);
+        AddKeeperPreview(_firstKeeperActivation);
+    }
+
+    private bool KeepersKnown()
+    {
+        for (var i = 0; i < 4; ++i)
+            if (_keeperIIDs[i] == 0)
+                return false;
+        return true;
+    }
+
+    private int IndexOfKeeper(ulong iid)
+    {
+        for (var i = 0; i < 4; ++i)
+            if (_keeperIIDs[i] == iid)
+                return i;
+        return -1;
+    }
+
+    private bool IsPreview(Pending p) => p.ActorID == _bossID
+        && (p.ActionID == (uint)AID.BadBreathInstruction || p.ActionID == (uint)AID.PlaincrackerInstruction);
 
     private void Prune()
     {
