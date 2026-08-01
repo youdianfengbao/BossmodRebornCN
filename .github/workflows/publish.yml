@@ -13,6 +13,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: true
+          fetch-depth: 0
 
       - name: Get Environment Variables
         run: |
@@ -34,7 +35,7 @@ jobs:
         run: dotnet restore BossMod\BossModReborn.csproj
 
       - name: Build Plugin
-        run: dotnet build --no-restore -c Release BossMod\BossModReborn.csproj -p:AssemblyVersion=${{ env.tag }} -p:FileVersion=${{ env.tag }} -p:PackageVersion=${{ env.tag }} -p:InformationalVersion=${{ env.tag }} --output .\build
+        run: dotnet build --no-restore -c Release BossMod\BossModReborn.csproj -p:Version=${{ env.tag }} -p:AssemblyVersion=${{ env.tag }} -p:FileVersion=${{ env.tag }} -p:PackageVersion=${{ env.tag }} -p:InformationalVersion=${{ env.tag }} --output .\build
 
       - name: Cleanup Build Output
         run: Get-ChildItem .\build\* -Exclude BossModReborn.*,DefaultRotationPresets.json,PInvoke.User32.dll | Remove-Item -Force -Recurse
@@ -42,8 +43,31 @@ jobs:
       - name: Zip Plugin
         run: Compress-Archive -Path .\build\* -DestinationPath .\build\latest.zip
 
+      - name: Generate Release Notes
+        shell: pwsh
+        run: |
+          $tag = "${{ env.tag }}"
+          $prev = git tag --list --sort=-creatordate | Where-Object { $_ -ne $tag } | Select-Object -First 1
+
+          if ($prev) {
+            $commits = git log "$prev..$tag" --no-merges --pretty=format:"- %h %an: %s"
+          } else {
+            $commits = @()
+          }
+
+          if (-not $commits -or $commits.Count -eq 0) {
+            $commits = git log -n 10 --no-merges --pretty=format:"- %h %an: %s"
+          }
+
+          $body = @("## 变更日志") + $commits
+          $body -join "`n" | Out-File -FilePath release_notes.md -Encoding UTF8
+
+          Write-Host "Previous tag: $prev"
+          Write-Host "Release notes written to $(Resolve-Path release_notes.md)"
+
       - name: Publish Plugin
         uses: softprops/action-gh-release@v3
         with:
           files: ./build/latest.zip
+          body_path: release_notes.md
           token: ${{ secrets.GITHUB_TOKEN }}
