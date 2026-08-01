@@ -96,7 +96,12 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
         Prune();
         _displayed.Clear();
         var ordered = _pending.OrderBy(p => p.Activation).ToArray();
-        var riskyDeadline = ordered.Length > 0 ? ordered[0].Activation.AddSeconds(0.25d) : DateTime.MinValue;
+        // Magic Hammer resolves as three one-second-spaced batches. If only the current batch is
+        // risky, AI picks a technically safe point that is already covered by the second batch and
+        // cannot leave the 8y circle in time. Keep the current and next batch forbidden so it plans
+        // the step pattern; including all three at once would incorrectly erase every useful route.
+        var riskWindow = ordered.Length > 0 && ordered[0].ActionID == (uint)AID.MagicHammerAOE ? 1.25d : 0.25d;
+        var riskyDeadline = ordered.Length > 0 ? ordered[0].Activation.AddSeconds(riskWindow) : DateTime.MinValue;
         foreach (var pending in ordered)
         {
             var source = pending.FollowCaster ? WorldState.Actors.Find(pending.ActorID) : null;
@@ -302,9 +307,11 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
     private static readonly AOEShapeDonutSector OuterCell = new(11.5f, 20.5f, 47f.Degrees());
     private readonly List<AOEInstance> _displayed = [];
     private readonly HashSet<uint> _seenSequences = [];
+    private readonly Dictionary<ulong, Angle> _orientationBaseline = [];
     private DateTime _activation;
     private int _resolvedCells;
     private bool _armed;
+    private bool _directionsFresh;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
@@ -320,20 +327,15 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
         if (inner1 == null || inner2 == null || outer1 == null || outer2 == null)
             return CollectionsMarshal.AsSpan(_displayed);
 
-        // The game only transmits the final sector orientation at the reveal (~0.09s before the
-        // hit), and the helpers are parked at the boss until then. Publish the wheel immediately so
-        // the first roulette is visible at all; the always-dangerous center stays red, while the
-        // sector cells turn dangerous the moment the helpers are confirmed at the arena center.
-        var confirmed = (inner1.Position - Module.Arena.Center).LengthSq() <= 1f
-            && (inner2.Position - Module.Arena.Center).LengthSq() <= 1f
-            && (outer1.Position - Module.Arena.Center).LengthSq() <= 1f
-            && (outer2.Position - Module.Arena.Center).LengthSq() <= 1f;
-
         Add(CenterCell, default, true);
-        Add(InnerCell, inner1.Rotation, confirmed, inner1.InstanceID);
-        Add(InnerCell, inner2.Rotation, confirmed, inner2.InstanceID);
-        Add(OuterCell, outer1.Rotation, confirmed, outer1.InstanceID);
-        Add(OuterCell, outer2.Rotation, confirmed, outer2.InstanceID);
+        UpdateDirectionFreshness(inner1, inner2, outer1, outer2);
+        if (_directionsFresh)
+        {
+            Add(InnerCell, inner1.Rotation, true, inner1.InstanceID);
+            Add(InnerCell, inner2.Rotation, true, inner2.InstanceID);
+            Add(OuterCell, outer1.Rotation, true, outer1.InstanceID);
+            Add(OuterCell, outer2.Rotation, true, outer2.InstanceID);
+        }
         return CollectionsMarshal.AsSpan(_displayed);
     }
 
@@ -383,6 +385,11 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
         _activation = activation;
         _resolvedCells = 0;
         _seenSequences.Clear();
+        _orientationBaseline.Clear();
+        foreach (var offset in new ulong[] { 37, 38, 39, 40 })
+            if (Helper(offset) is { } helper)
+                _orientationBaseline[helper.InstanceID] = helper.Rotation;
+        _directionsFresh = false;
     }
 
     private void Clear()
@@ -390,6 +397,17 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
         _armed = false;
         _resolvedCells = 0;
         _displayed.Clear();
+        _orientationBaseline.Clear();
+        _directionsFresh = false;
+    }
+
+    private void UpdateDirectionFreshness(params Actor[] helpers)
+    {
+        if (_directionsFresh || _orientationBaseline.Count != 4)
+            return;
+
+        _directionsFresh = helpers.All(helper => _orientationBaseline.TryGetValue(helper.InstanceID, out var baseline)
+            && Math.Abs((helper.Rotation - baseline).Normalized().Rad) > 1f.Degrees().Rad);
     }
 
     private void Prune()

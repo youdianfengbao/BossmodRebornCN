@@ -66,15 +66,14 @@ public enum SID : uint
     Correction5 = 0x139A // knowledge level +5
 }
 
-// The location-targeted ink circles and self-targeted basic attacks all expose authoritative cast
-// packets. SummonPages is deliberately omitted: its four-yalm Action-sheet range is only a spawn
-// marker and is not a damaging circle.
+// These location/self casts expose authoritative warning packets, including the initial cross
+// writing and the four-yalm page landing circles.
 sealed class BasicAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 {
-    // Replay-verified ink-hit radius is ~9y (p90=9.0, max=9.2), not 15y; the oversized 15y circles
-    // overlapped the 6y gaps and hid the weave path, so the AI could not thread the 3x3 grid.
     private static readonly AOEShapeCircle Blot = new(9.5f);
     private static readonly AOEShapeCircle BookDrop = new(3f);
+    private static readonly AOEShapeCircle SummonPages = new(4f);
+    private static readonly AOEShapeCross QuadRule = new(25f, 5f);
     private static readonly AOEShapeCone FireII = new(60f, 22.5f.Degrees());
 
     // Blot/book-drop grids expose several waves up front at two-second intervals. With the
@@ -88,7 +87,8 @@ sealed class BasicAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
         (uint)AID.Blot => new(Blot, true),
-
+        (uint)AID.QuadRule => new(QuadRule, true),
+        (uint)AID.SummonPages => new(SummonPages),
         (uint)AID.BookDrop => new(BookDrop),
         (uint)AID.FireII => new(FireII),
         _ => null

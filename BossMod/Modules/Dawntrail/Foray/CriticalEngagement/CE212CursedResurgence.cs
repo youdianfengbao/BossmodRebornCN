@@ -40,6 +40,11 @@ public enum AID : uint
     Soar = 0xC538 // boss->self, 4.0s cast, movement visual
 }
 
+public enum SID : uint
+{
+    DirectionalImmunity = 1125 // MagicBarrier: directional immunity sides are encoded in Extra
+}
+
 // All casted avoidable attacks expose the actor that owns the real shape. In particular, the
 // Grave Mold helpers are already placed at the eventual gas locations, while Cauterize's helper
 // carries the actual lane origin and rotation independently of the boss visual.
@@ -127,6 +132,79 @@ sealed class MovingNecrohaze(BossModule module) : Components.GenericAOEs(module)
     }
 }
 
+sealed class NecrohazeBoundary(BossModule module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeDonut Shape = new(20f, 30f);
+    private readonly AOEInstance[] _aoe = [new(Shape, module.Arena.Center)];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
+}
+
+sealed class MagicBarrierDirectionalParry(BossModule module) : Components.DirectionalParry(module,
+    [(uint)OID.MagicBarrier], forbiddenPriority: AIHints.Enemy.PriorityInvincible)
+{
+    public override void OnStatusGain(Actor actor, ref ActorStatus status)
+    {
+        if (actor.OID == (uint)OID.MagicBarrier && status.ID == (uint)SID.DirectionalImmunity)
+            ActorStates[actor.InstanceID] = status.Extra & 0xF;
+        else
+            base.OnStatusGain(actor, ref status);
+    }
+
+    public override void OnStatusLose(Actor actor, ref ActorStatus status)
+    {
+        if (actor.OID == (uint)OID.MagicBarrier && status.ID == (uint)SID.DirectionalImmunity)
+            UpdateState(actor.InstanceID, ActorState(actor.InstanceID) & ~0xF);
+        else
+            base.OnStatusLose(actor, ref status);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var barrier in Module.Enemies((uint)OID.MagicBarrier))
+        {
+            if (!barrier.IsDeadOrDestroyed && ActorStates.ContainsKey(barrier.InstanceID))
+                hints.SetPriority(barrier, 1);
+        }
+
+        base.AddAIHints(slot, actor, assignment, hints);
+    }
+}
+
+// During Aetherial Ward the boss raises a reflecting magic barrier (the non-targetable MagicBarrier
+// object). Any damage dealt to the boss while that barrier stands bounces straight back and wipes
+// the automated party, so mark the boss un-attackable for as long as the barrier actor exists. This
+// also frees the AI to keep dodging the moving Necrohaze "saw" circles instead of standing still to
+// attack the warded boss. Keying off the barrier actor's presence self-resets when it despawns and
+// fails safe (no barrier detected -> normal attacking).
+sealed class AetherialWardBarrier(BossModule module) : Components.GenericAOEs(module)
+{
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => [];
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        var warded = false;
+        foreach (var barrier in Module.Enemies((uint)OID.MagicBarrier))
+        {
+            if (!barrier.IsDeadOrDestroyed)
+            {
+                warded = true;
+                break;
+            }
+        }
+        if (!warded)
+            return;
+
+        var count = hints.PotentialTargets.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            var e = hints.PotentialTargets[i];
+            if (e.Actor.OID == (uint)OID.Boss)
+                e.Priority = AIHints.Enemy.PriorityInvincible;
+        }
+    }
+}
+
 // Damage is split between helpers; the boss visuals are the stable, non-duplicated warnings.
 sealed class CursedResurgenceRaidwides(BossModule module) : Components.RaidwideCasts(module,
     [(uint)AID.MortalStormVisual, (uint)AID.HowlingDarknessVisual]);
@@ -139,6 +217,9 @@ sealed class CursedResurgenceStates : StateMachineBuilder
             .ActivateOnEnter<CursedResurgenceAOEs>()
             .ActivateOnEnter<ZombieGas>()
             .ActivateOnEnter<MovingNecrohaze>()
+            .ActivateOnEnter<NecrohazeBoundary>()
+            .ActivateOnEnter<MagicBarrierDirectionalParry>()
+            .ActivateOnEnter<AetherialWardBarrier>()
             .ActivateOnEnter<CursedResurgenceRaidwides>();
     }
 }

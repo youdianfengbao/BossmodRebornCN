@@ -23,18 +23,14 @@ public enum AID : uint {
 sealed class AllEyes(BossModule module) : Components.RaidwideCast(module, (uint)AID.AllEyes);
 sealed class Jettatura(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Jettatura, new AOEShapeCircle(8.0f));
 sealed class ColdStare(BossModule module) : Components.SimpleAOEs(module, (uint)AID.ColdStare, new AOEShapeCone(40.0f, 45.0f.Degrees()));
-sealed class SeeNoEvil(BossModule module) : Components.CastGaze(module, (uint)AID.SeeNoEvil);
-sealed class SinisterSight(BossModule module) : Components.CastGaze(module, (uint)AID.SinisterSight);
 
 [SkipLocalsInit]
 sealed class EvilSeerStates : StateMachineBuilder {
     public EvilSeerStates(BossModule module) : base(module) {
         TrivialPhase()
             .ActivateOnEnter<AllEyes>()
-            .ActivateOnEnter<SeeNoEvil>()
             .ActivateOnEnter<Jettatura>()
-            .ActivateOnEnter<ColdStare>()
-            .ActivateOnEnter<SinisterSight>();
+            .ActivateOnEnter<ColdStare>();
     }
 }
 

@@ -80,11 +80,33 @@ sealed class WhatGoesAroundAOEs(BossModule module) : ReplayValidatedCastAOEs(mod
 // B84F is split across three helpers. The boss cast is the stable advance warning.
 sealed class DarkIV(BossModule module) : Components.RaidwideCast(module, (uint)AID.DarkIV);
 
+sealed class ElectricBoundary(BossModule module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeRect Shape = new(24.5f, 0.75f, 24.5f);
+    private readonly AOEInstance[] _aoes = Build(module.Arena.Center);
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoes;
+
+    private static AOEInstance[] Build(WPos center)
+    {
+        var result = new AOEInstance[4];
+        for (var i = 0; i < result.Length; ++i)
+        {
+            var normal = (i * 90f).Degrees().ToDirection();
+            var rotation = Angle.FromDirection(normal.OrthoL());
+            var origin = center + 23.75f * normal;
+            result[i] = new(Shape, origin, rotation, color: Colors.Danger, shapeDistance: Shape.Distance(origin, rotation));
+        }
+        return result;
+    }
+}
+
 sealed class WhatGoesAroundStates : StateMachineBuilder
 {
     public WhatGoesAroundStates(BossModule module) : base(module)
     {
         TrivialPhase()
+            .ActivateOnEnter<ElectricBoundary>()
             .ActivateOnEnter<WhatGoesAroundAOEs>()
             .ActivateOnEnter<DarkIV>();
     }

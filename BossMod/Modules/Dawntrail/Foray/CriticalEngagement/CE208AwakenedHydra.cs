@@ -49,9 +49,8 @@ public enum AID : uint
 // ElementalSpill1 leaves a small poison pool at its resolved location. ToxinScatter then ticks
 // once per second at that same position for roughly ten seconds. The tick helpers are recycled
 // between waves, so tracking helper instance IDs would keep stale pools or create duplicates;
-// key the pools by position instead. Only the spill is authoritative for creating a pool: old
-// high-speed replays can retain stale helper coordinates on unmatched ticks, so those ticks may
-// refresh a nearby known pool but must never create a new one.
+// key the pools by position instead. A live in-arena toxin tick can also restore a pool when the
+// initial spill packet was missed (for example when the module activates mid-mechanic).
 sealed class ToxinPools(BossModule module) : Components.GenericAOEs(module)
 {
     // The green puddle spawns small and expands over roughly nine seconds (replay tick distances
@@ -107,9 +106,9 @@ sealed class ToxinPools(BossModule module) : Components.GenericAOEs(module)
         var isSpill = spell.Action.ID == (uint)AID.ElementalSpill1;
         if (pool == null)
         {
-            if (isSpill)
+            if (isSpill || caster.OID == (uint)OID.Helper && Arena.InBounds(origin))
             {
-                _pools.Add(new(origin, now, now.AddSeconds(PredictedLifetime)));
+                _pools.Add(new(origin, now, now.AddSeconds(isSpill ? PredictedLifetime : TickLifetime)));
             }
         }
         else
@@ -162,15 +161,147 @@ sealed class HydraAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
         (uint)AID.RingLightningInner => new(InnerRing),
         (uint)AID.RingLightningOuter => new(OuterRing),
         >= (uint)AID.ElementalShockwave1 and <= (uint)AID.ElementalShockwave5 => new(Shockwave, true),
-        (uint)AID.MultipleBreaths1 or (uint)AID.MultipleBreaths2 or (uint)AID.MultipleBreaths3 or (uint)AID.MultipleBreaths4 => new(Breath),
         _ => null
     };
+}
+
+// Multiple Breaths has two linked six-hit sequences. The fast B86C casts reveal the order during
+// the long visual; after the visual resolves, C5F1/C5F2/C5F3 repeat that exact order. Treating the
+// 0.5s follow-up casts as unrelated AOEs gives navigation too little time to move. Record the first
+// sequence and publish the repeated sequence in advance, with the current and next cones risky so
+// AI can choose a route through the rotating pattern.
+sealed class MultipleBreathsSequence(BossModule module) : Components.GenericAOEs(module)
+{
+    private sealed class BreathStep(uint actionID, Angle rotation, DateTime activation, ulong actorID)
+    {
+        public readonly uint ActionID = actionID;
+        public Angle Rotation = rotation;
+        public DateTime Activation = activation;
+        public ulong ActorID = actorID;
+    }
+
+    private static readonly AOEShapeCone Shape = new(30f, 60f.Degrees());
+    private const double FirstFollowupDelay = 1.03d;
+    private const double FollowupInterval = 2.06d;
+    private const double RiskWindow = 2.2d;
+    private readonly List<Angle> _recorded = [with(6)];
+    private readonly List<BreathStep> _steps = [with(6)];
+    private readonly List<AOEInstance> _displayed = [with(6)];
+    private bool _recording;
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        Prune();
+        _displayed.Clear();
+        if (_steps.Count == 0)
+            return CollectionsMarshal.AsSpan(_displayed);
+
+        var deadline = _steps[0].Activation.AddSeconds(RiskWindow);
+        foreach (var step in _steps)
+        {
+            var risky = step.Activation <= deadline;
+            _displayed.Add(new(Shape, Module.Arena.Center, step.Rotation, step.Activation,
+                risky ? Colors.Danger : Colors.AOE, risky, step.ActorID, Shape.Distance(Module.Arena.Center, step.Rotation)));
+        }
+        return CollectionsMarshal.AsSpan(_displayed);
+    }
+
+    public override void Update() => Prune();
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.MultipleBreathsVisual && !spell.EventHappened)
+        {
+            _recorded.Clear();
+            _steps.Clear();
+            _recording = true;
+            return;
+        }
+
+        if (spell.Action.ID == (uint)AID.MultipleBreaths1 && !spell.EventHappened)
+        {
+            var activation = Module.CastFinishAt(spell);
+            if (_recording && _recorded.Count < 6)
+                _recorded.Add(spell.Rotation);
+            _steps.Clear();
+            _steps.Add(new((uint)AID.MultipleBreaths1, spell.Rotation, activation, caster.InstanceID));
+            return;
+        }
+
+        if (spell.Action.ID is (uint)AID.MultipleBreaths2 or (uint)AID.MultipleBreaths3 or (uint)AID.MultipleBreaths4)
+        {
+            // Replace the prediction with authoritative rotation/timing as soon as the short cast
+            // packet arrives, while retaining the rest of the learned sequence.
+            var index = _steps.FindIndex(step => step.ActionID == spell.Action.ID);
+            if (index < 0 && _steps.Count != 0)
+                index = 0;
+            if (index >= 0)
+            {
+                _steps[index].Rotation = spell.Rotation;
+                _steps[index].Activation = Module.CastFinishAt(spell);
+                _steps[index].ActorID = caster.InstanceID;
+                _steps.Sort((left, right) => left.Activation.CompareTo(right.Activation));
+            }
+        }
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == (uint)AID.MultipleBreathsVisual)
+        {
+            _recording = false;
+            _steps.Clear();
+            if (_recorded.Count == 6)
+            {
+                var first = WorldState.FutureTime(FirstFollowupDelay);
+                for (var i = 0; i < _recorded.Count; ++i)
+                {
+                    var rotation = _recorded[i];
+                    _steps.Add(new(FollowupAction(rotation), rotation, first.AddSeconds(i * FollowupInterval), 0));
+                }
+            }
+            return;
+        }
+
+        if (spell.Action.ID is not ((uint)AID.MultipleBreaths1) and not ((uint)AID.MultipleBreaths2)
+            and not ((uint)AID.MultipleBreaths3) and not ((uint)AID.MultipleBreaths4))
+            return;
+
+        var index = _steps.FindIndex(step => step.ActionID == spell.Action.ID && step.Activation <= WorldState.FutureTime(0.75d));
+        if (index < 0 && _steps.Count != 0)
+            index = 0;
+        if (index >= 0)
+            _steps.RemoveAt(index);
+        ++NumCasts;
+    }
+
+    private uint FollowupAction(Angle rotation)
+    {
+        var relative = (rotation - Module.PrimaryActor.Rotation).Normalized().Rad;
+        if (MathF.Abs(relative) < 30f * Angle.DegToRad)
+            return (uint)AID.MultipleBreaths2;
+        return relative < 0f ? (uint)AID.MultipleBreaths3 : (uint)AID.MultipleBreaths4;
+    }
+
+    private void Prune()
+    {
+        var now = WorldState.CurrentTime;
+        _steps.RemoveAll(step => now > step.Activation.AddSeconds(1d));
+    }
 }
 
 // B86A is emitted by several helpers and splits the damage packets; the boss visual is the
 // stable cast-bar warning for the unavoidable hit.
 sealed class QuintetRoar(BossModule module) : Components.RaidwideCast(module, (uint)AID.QuintetRoar);
-sealed class BlindingFlash(BossModule module) : Components.CastGaze(module, (uint)AID.BlindingFlash);
+sealed class BlindingFlash(BossModule module) : Components.CastGaze(module, (uint)AID.BlindingFlash)
+{
+    // Rotation control needs a small lead to stop target-facing before the server snapshots gaze.
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.BlindingFlash && !spell.EventHappened)
+            Eyes.Add(new(caster.Position, Module.CastFinishAt(spell, -0.75f), actorID: caster.InstanceID));
+    }
+}
 
 sealed class AwakenedHydraStates : StateMachineBuilder
 {
@@ -178,6 +309,7 @@ sealed class AwakenedHydraStates : StateMachineBuilder
     {
         TrivialPhase()
             .ActivateOnEnter<HydraAOEs>()
+            .ActivateOnEnter<MultipleBreathsSequence>()
             .ActivateOnEnter<ToxinPools>()
             .ActivateOnEnter<BlindingFlash>()
             .ActivateOnEnter<QuintetRoar>();

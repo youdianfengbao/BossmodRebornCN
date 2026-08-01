@@ -98,7 +98,9 @@ class StormWave(BossModule module) : Components.Exaflare(module, new AOEShapeRec
                 ref var aoe = ref futureAOEs[i];
                 var origin = aoe.Item1;
                 var rotation = aoe.Item3;
-                _aoes[i] = new(Shape, origin, rotation, aoe.Item2, FutureColor, shapeDistance: Shape.Distance(origin, rotation));
+                // Future steps are useful visual markers, but treating the whole wave train as
+                // dangerous at once sends navigation on a long detour around the arena.
+                _aoes[i] = new(Shape, origin, rotation, aoe.Item2, FutureColor, risky: false, shapeDistance: Shape.Distance(origin, rotation));
             }
 
             for (var i = 0; i < imminentLen; ++i) {
@@ -106,8 +108,9 @@ class StormWave(BossModule module) : Components.Exaflare(module, new AOEShapeRec
                 var origin = aoe.Item1;
                 var rotation = aoe.Item3;
                 var line = Lines[i];
-                var color = (waves.Find(w => w.RightLine == line || w.LeftLine == line)?.waveStart ?? true) ? ImminentColor : FutureColor;
-                _aoes[futureLen + i] = new(Shape, origin, rotation, aoe.Item2, color, shapeDistance: Shape.Distance(origin, rotation));
+                var risky = waves.Find(w => w.RightLine == line || w.LeftLine == line)?.waveStart ?? true;
+                var color = risky ? ImminentColor : FutureColor;
+                _aoes[futureLen + i] = new(Shape, origin, rotation, aoe.Item2, color, risky: risky, shapeDistance: Shape.Distance(origin, rotation));
             }
             lastCount = linesCount;
             lastVersion = currentVersion;

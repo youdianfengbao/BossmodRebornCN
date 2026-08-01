@@ -104,13 +104,22 @@ sealed class MorphingMageAOEs(BossModule module) : ReplayValidatedCastAOEs(modul
     };
 }
 
-// Made Magic creates four fixed helpers 7.8y from center. They pulse every ~0.6s while status
-// 1909 grows from extra 1 through 7. The pulse is an expanding wave: actors already crossed by
-// an earlier pulse can stand inside the current radius without being hit again. Treating it as a
-// filled circle makes extra 7 falsely cover the entire arena, so only the next 2.5y ring is risky.
+// Made Magic creates four fixed helpers 7.8y from center (cardinal on one cast, diagonal on the
+// next). They pulse every ~0.6s while status 1909 grows from extra 1 through 7; each pulse is a
+// thin expanding ring whose edge sits at extra*2.5y (verified in replay: hits only ever land on
+// the 2.5y band at the current radius, never inside). The wave stops at extra 7 = 17.5y.
+//
+// The drawn shape stays the accurate thin ring so a human sees the real wave. The AI hint, however,
+// cannot reliably surf four simultaneous rings, so it uses a filled circle out to the wave's
+// (anticipated) radius, capped at the 17.5y maximum, around every active helper. The union of four
+// 17.5y circles still leaves the four arena-edge pockets that sit >20y from every helper (the exact
+// spots survivors stand on), so the AI is parked in a pocket that is safe for the whole sequence and
+// never has to cross a ring - guaranteeing it is never clipped by the poison.
 sealed class MadeMagic(BossModule module) : Components.GenericAOEs(module)
 {
+    private const float MaxRadius = 17.5f; // extra 7 * 2.5
     private readonly Dictionary<ulong, AOEInstance> _pending = [];
+    private readonly Dictionary<ulong, int> _extra = [];
     private readonly List<AOEInstance> _displayed = new(4);
     private readonly HashSet<uint> _seenGlobalSequences = [];
 
@@ -121,14 +130,39 @@ sealed class MadeMagic(BossModule module) : Components.GenericAOEs(module)
         return CollectionsMarshal.AsSpan(_displayed);
     }
 
+    // Drive AI avoidance off filled circles instead of the drawn thin rings: forbid everything the
+    // wave has swept (plus one anticipated step to cover the status packet arriving after the pulse),
+    // capped at 17.5y so the four edge pockets stay open.
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var (id, aoe) in _pending)
+        {
+            var radius = Math.Min((_extra.GetValueOrDefault(id) + 1) * 2.5f, MaxRadius);
+            if (radius > 0f)
+                hints.AddForbiddenZone(new AOEShapeCircle(radius), aoe.Origin);
+        }
+    }
+
     public override void Update()
     {
+        // Components can be activated after the helpers already received their growth status.
+        // Recover that live state instead of waiting for a status-gain packet that will never repeat.
+        foreach (var helper in Module.Enemies((uint)OID.Helper))
+        {
+            var status = helper.FindStatus((uint)SID.AreaOfInfluenceUp);
+            if (status is { } current && current.Extra is >= 1 and <= 7
+                && (!_extra.TryGetValue(helper.InstanceID, out var knownExtra) || knownExtra != current.Extra))
+            {
+                SetRing(helper, current.Extra);
+            }
+        }
+
         // The four helpers can persist after the mechanic without a status-loss packet (replays and
         // live packet loss both do this). If no pulse has refreshed a ring for a while, it is stale
         // and must not remain drawn until the next mechanic.
         var now = WorldState.CurrentTime;
         foreach (var key in _pending.Keys.Where(key => now > _pending[key].Activation.AddSeconds(1.5d)).ToArray())
-            _pending.Remove(key);
+            Remove(key);
     }
 
     public override void OnStatusGain(Actor actor, ref ActorStatus status)
@@ -137,20 +171,27 @@ sealed class MadeMagic(BossModule module) : Components.GenericAOEs(module)
             || status.ID != (uint)SID.AreaOfInfluenceUp || status.Extra is < 1 or > 7)
             return;
 
-        var outer = status.Extra * 2.5f;
-        AOEShape shape = status.Extra == 1 ? new AOEShapeCircle(outer) : new AOEShapeDonut(outer - 2.5f, outer);
-        _pending[actor.InstanceID] = new(shape, actor.Position, color: Colors.Danger, activation: WorldState.FutureTime(0.3f),
-            actorID: actor.InstanceID, shapeDistance: shape.Distance(actor.Position, default));
+        SetRing(actor, status.Extra);
+    }
+
+    private void SetRing(Actor actor, int extra)
+    {
+        var outer = extra * 2.5f;
+        AOEShape shape = extra == 1 ? new AOEShapeCircle(outer) : new AOEShapeDonut(outer - 2.5f, outer);
+        // Visual only (risky: false); avoidance is handled by AddAIHints above.
+        _pending[actor.InstanceID] = new(shape, actor.Position, color: Colors.Danger, risky: false,
+            activation: WorldState.FutureTime(0.3f), actorID: actor.InstanceID, shapeDistance: shape.Distance(actor.Position, default));
+        _extra[actor.InstanceID] = extra;
     }
 
     public override void OnStatusLose(Actor actor, ref ActorStatus status)
     {
         if (status.ID == (uint)SID.AreaOfInfluenceUp)
-            _pending.Remove(actor.InstanceID);
+            Remove(actor.InstanceID);
     }
 
-    public override void OnActorDeath(Actor actor) => _pending.Remove(actor.InstanceID);
-    public override void OnActorDestroyed(Actor actor) => _pending.Remove(actor.InstanceID);
+    public override void OnActorDeath(Actor actor) => Remove(actor.InstanceID);
+    public override void OnActorDestroyed(Actor actor) => Remove(actor.InstanceID);
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
@@ -163,6 +204,12 @@ sealed class MadeMagic(BossModule module) : Components.GenericAOEs(module)
         // therefore not the end of the ring; move the same warning to the next observed cadence.
         // A new status replaces its geometry, and status loss performs the final cleanup.
         _pending[caster.InstanceID] = current with { Activation = WorldState.FutureTime(0.58d) };
+    }
+
+    private void Remove(ulong id)
+    {
+        _pending.Remove(id);
+        _extra.Remove(id);
     }
 }
 
@@ -186,7 +233,7 @@ sealed class ChargeDashes(BossModule module) : Components.GenericAOEs(module)
 {
     private const float HalfWidth = 5f;
     private const float MinDashStep = 0.25f; // ~100y/s at 100Hz replay / ~1.7y per 60Hz frame; walks stay well below
-    private const double DashLifetime = 1.5d;
+    private const double DashLifetime = 0.4d;
     private readonly List<AOEInstance> _segments = [];
     private readonly List<AOEInstance> _displayed = [with(32)];
     private WPos _lastPosition;

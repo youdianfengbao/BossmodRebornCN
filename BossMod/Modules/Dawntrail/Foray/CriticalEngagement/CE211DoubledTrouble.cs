@@ -57,7 +57,7 @@ sealed class CalofisteriAOEs(BossModule module) : ReplayValidatedCastAOEs(module
 {
     private static readonly AOEShapeCircle SixYalms = new(6f);
     private static readonly AOEShapeCircle HairShearsCircle = new(10f);
-    private static readonly AOEShapeRect HairShearsLine = new(60f, 2f);
+    private static readonly AOEShapeRect HairShearsLine = new(60f, 2f, 60f, 90f.Degrees());
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
@@ -294,7 +294,7 @@ sealed class MaliciousWeavePulls(BossModule module) : Components.SimpleKnockback
 // helper instance id.
 sealed class HairShearsPulls(BossModule module) : Components.GenericKnockback(module)
 {
-    private static readonly AOEShapeRect Shape = new(60f, 2f);
+    private static readonly AOEShapeRect Shape = new(60f, 2f, 60f, 90f.Degrees());
     private readonly List<Knockback> _pulls = [with(8)];
     private readonly HashSet<uint> _seenGlobalSequences = [];
 

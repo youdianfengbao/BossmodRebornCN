@@ -38,10 +38,20 @@ public enum AID : uint
 
 sealed class WindBoundary(BossModule module) : Components.GenericAOEs(module)
 {
-    private static readonly AOEShapeDonut Shape = new(19f, 30f);
-    private readonly AOEInstance[] _aoe = [new(Shape, module.Arena.Center)];
+    // The wall is lethal from 19y outward; draw it accurately for the human overlay but mark it
+    // non-risky so the AI zone below can use a tighter inner radius.
+    private static readonly AOEShapeDonut Visual = new(19f, 30f);
+    // Give the AI a 2y buffer inside the true wall. The rotating WindBloom ice-flowers are 13y
+    // circles emitted from the 16y ring, so the only safe pocket is near dead center; without a
+    // buffer, squeezing away from a bloom can round the destination onto the 19y deathwall. Keeping
+    // the AI at or inside 17y guarantees it never clips the wall while dodging blooms.
+    private static readonly AOEShapeDonut Forbidden = new(17f, 30f);
+    private readonly AOEInstance[] _aoe = [new(Visual, module.Arena.Center, risky: false)];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+        => hints.AddForbiddenZone(Forbidden, Module.Arena.Center);
 }
 
 sealed class KidnapperAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
@@ -352,8 +362,71 @@ sealed class GustWallKnockbacks(BossModule module) : Components.GenericKnockback
     }
 }
 
-// BC7A is the cast-bar telegraph for B950, whose action effect is a 24y SourceForward knockback.
-sealed class GustKnockback(BossModule module) : Components.SimpleKnockbacks(module, (uint)AID.GustTelegraph, 24f, shape: new AOEShapeRect(60f, 30f), kind: Kind.DirForward);
+// BC7A is the cast-bar telegraph for B950, whose action effect is a 24y directional knockback.
+// The gust comes from the wall on the main tank's side and flings everyone across the arena, so
+// the helper's cast rotation already encodes the true push direction; the tank only decides which
+// side the helper spawns on. Do not re-derive the direction from the tank's position - the helper
+// rotation is authoritative (and stays valid even when the tank is mid-arena, which will carry the
+// whole party out of bounds).
+sealed class GustKnockback(BossModule module) : Components.GenericKnockback(module)
+{
+    private static readonly AOEShapeRect Shape = new(60f, 30f);
+    private const float Distance = 24f;
+    private const float SafeRadius = 19f;
+    // Replay event timing is consistently about 0.60s after the helper cast finishes. Using the
+    // old 1.05s estimate scheduled the safe-edge constraint roughly 0.4s after the real knockback.
+    private const double HitDelay = 0.60d;
+    private readonly List<Knockback> _casters = [with(2)];
+
+    public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor)
+    {
+        PruneExpired();
+        return CollectionsMarshal.AsSpan(_casters);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var kb in _casters)
+            hints.AddForbiddenZone(new SDKnockbackInCircleFixedDirection(Arena.Center, Distance * kb.Direction.ToDirection(), SafeRadius), kb.Activation);
+    }
+
+    public override void AddHints(int slot, Actor actor, TextHints hints)
+    {
+        base.AddHints(slot, actor, hints);
+        if (_casters.Count == 0)
+            return;
+
+        var tank = Module.PrimaryActor?.TargetID is ulong id && id != 0 ? WorldState.Actors.Find(id) : null;
+        if (tank != null && !tank.IsDeadOrDestroyed && (tank.Position - Module.Arena.Center).Length() < 5f)
+            hints.Add("主坦克站在中场——阵风会把全队推出边界！");
+    }
+
+    public override void Update() => PruneExpired();
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID != (uint)AID.GustTelegraph || spell.EventHappened)
+            return;
+
+        _casters.RemoveAll(kb => kb.ActorID == caster.InstanceID);
+        _casters.Add(new(spell.LocXZ, Distance, Module.CastFinishAt(spell, HitDelay), Shape, spell.Rotation, Kind.DirForward, actorID: caster.InstanceID));
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID != (uint)AID.GustHit)
+            return;
+
+        _casters.Clear();
+        ++NumCasts;
+    }
+
+    private void PruneExpired()
+    {
+        var now = WorldState.CurrentTime;
+        _casters.RemoveAll(kb => now > kb.Activation.AddSeconds(1d));
+    }
+}
 // B94C resolves into the BBF8 helper raidwide about 0.9s after the boss cast. BC7A similarly
 // resolves into B950 while applying the directional knockback.
 sealed class KidnapperRaidwides(BossModule module) : Components.RaidwideCasts(module, [(uint)AID.HurricaneVisual, (uint)AID.GustTelegraph]);

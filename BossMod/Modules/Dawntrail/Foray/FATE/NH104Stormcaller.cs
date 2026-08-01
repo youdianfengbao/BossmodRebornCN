@@ -56,12 +56,6 @@ sealed class FreefallSequence(BossModule module) : Components.GenericAOEs(module
             _aoes.Add(new(Shape, spell.LocXZ, activation: Module.CastFinishAt(spell, offset)));
     }
 
-    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
-    {
-        if (spell.Action.ID == (uint)AID.FreefallTeleport && !spell.EventHappened)
-            _aoes.Clear();
-    }
-
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
         if (spell.Action.ID != (uint)AID.Freefall

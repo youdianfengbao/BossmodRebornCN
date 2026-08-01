@@ -45,6 +45,8 @@ sealed class SpinningSweep(BossModule module) : Components.SimpleAOEs(module, (u
 sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeCircle Shape = new(4f);
+    private static readonly AOEShapeCircle AIShape = new(5.5f);
+    private const float PredictionLength = 8f;
     private readonly List<Actor> _blades = module.Enemies((uint)OID.AlabasterBlade);
     private readonly List<AOEInstance> _active = [with(8)];
 
@@ -54,6 +56,20 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
         foreach (var blade in _blades)
             AddBlade(blade);
         return CollectionsMarshal.AsSpan(_active);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        var live = _blades.Where(blade => !blade.IsDeadOrDestroyed).ToArray();
+        foreach (var blade in live)
+        {
+            hints.AddForbiddenZone(AIShape, blade.Position);
+            if (blade.LastFrameMovement.LengthSq() > 0.0001f)
+                hints.AddForbiddenZone(new SDCapsule(blade.Position, blade.LastFrameMovement.Normalized(), PredictionLength, 5.5f));
+        }
+
+        if (live.Length != 0)
+            hints.GoalZones.Add(position => live.All(blade => !position.InCircle(blade.Position, 7f)) ? 10f : 0f);
     }
 
     private void AddBlade(Actor blade)
@@ -144,6 +160,14 @@ sealed class BladePatterns(BossModule module) : Components.GenericAOEs(module)
     }
 
     public override void Update() => PruneExpired();
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        var risky = ActiveAOEs(slot, actor).ToArray().Where(aoe => aoe.Risky).ToArray();
+        if (risky.Length != 0)
+            hints.GoalZones.Add(position => risky.All(aoe => !aoe.Check(position)) ? 20f : 0f);
+    }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {

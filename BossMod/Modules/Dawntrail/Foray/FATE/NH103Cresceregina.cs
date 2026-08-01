@@ -35,7 +35,7 @@ sealed class NobleBlaster(BossModule module) : Components.SimpleAOEs(module, (ui
 sealed class ThunderboltPuddle(BossModule module) : Components.GenericAOEs(module) {
     private static readonly AOEShapeCircle Shape = new(10f);
     private readonly List<AOEInstance> _aoes = [];
-    private readonly List<AOEInstance> _displayed = [with(3)];
+    private readonly List<AOEInstance> _displayed = [with(9)];
     private readonly HashSet<uint> _seenGlobalSequences = [];
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell) {
@@ -85,8 +85,9 @@ sealed class ThunderboltPuddle(BossModule module) : Components.GenericAOEs(modul
             return CollectionsMarshal.AsSpan(_displayed);
 
         var riskyDeadline = _aoes[0].Activation.AddSeconds(0.2d);
-        var count = Math.Min(_aoes.Count, 3);
-        for (var i = 0; i < count; ++i) {
+        // All nine casts start together, so show the complete route immediately. Only the next
+        // circle is risky; later circles are planning markers and must not constrain pathfinding.
+        for (var i = 0; i < _aoes.Count; ++i) {
             var aoe = _aoes[i];
             aoe.Risky = aoe.Activation <= riskyDeadline;
             aoe.Color = aoe.Risky ? Colors.Danger : Colors.AOE;
@@ -126,4 +127,20 @@ sealed class CrescereginaStates : StateMachineBuilder {
     SortOrder = 1,
     PlanLevel = 0)]
 [SkipLocalsInit]
-public sealed class Cresceregina(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);
+public sealed class Cresceregina(WorldState ws, Actor primary) : OpenWorldFate(ws, primary)
+{
+    protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.CalculateModuleAIHints(slot, actor, assignment, hints);
+
+        // SimpleBossModule normally keeps the pathfinding map centered on the player for open-world
+        // encounters. Cresceregina's FATE has a fixed 30y arena, so player-centered maps make the
+        // route bend toward a moving point instead of the actual FATE objective.
+        var fate = WorldState.Client.ActiveFate;
+        if (fate.ID == 2084u)
+        {
+            hints.PathfindMapCenter = new(fate.Center.XZ());
+            hints.PathfindMapBounds = new ArenaBoundsCircle(fate.Radius, 1f);
+        }
+    }
+}
