@@ -67,10 +67,12 @@ sealed class KidnapperAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 
 // GenericKnockback only renders displacement and does not add an AI forbidden zone. The moving
 // hurricane body is itself the four-yalm contact AOE, so publish a slightly padded live hazard too.
-// The storm pairs orbit the arena on two rings: the R20 ring clockwise at 3.0y/s (~8.6 deg/s) and
-// the R12 ring counterclockwise at 1.5y/s (~7.2 deg/s), both uniform circular motion. Enemy
-// positions only refresh on the ~5s MOVE packets, so each storm's position is extrapolated from
-// its registration time instead, and the baseline is re-anchored whenever a fresh packet drifts.
+// The storm pairs orbit the arena on two rings: the R20 ring at ~3.0y/s (~8.6 deg/s) and the R12
+// ring at ~1.5y/s (~7.2 deg/s), both uniform circular motion - but which way (clockwise vs
+// counterclockwise) each pair turns is chosen randomly per encounter, so it cannot be hardcoded.
+// Enemy positions only refresh on the ~5s MOVE packets, so each storm's position is extrapolated
+// from its registration time instead; the baseline is re-anchored whenever a fresh packet drifts,
+// and the rotation direction is measured from the initial position + first MOVE displacement.
 sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module)
 {
     private const float OuterRing = 20f;
@@ -79,6 +81,8 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
     private const float ContactRadius = 4.5f;
     private static readonly Angle TrackHalfAngle = 60f.Degrees(); // 120 degrees of track ahead of the storm
     private const float BaselineDriftSq = 9f; // 3y of extrapolation error before re-anchoring
+    private const float DetectMoveSq = 1f; // 1y of first MOVE displacement is enough to measure the turn direction
+    private const double MinDirectionDt = 1d; // require at least 1s between registration and the first MOVE
     private static readonly AOEShapeCircle Shape = new(ContactRadius);
     private static readonly AOEShapeDonutSector OuterTrack = new(OuterRing - ContactRadius, OuterRing + ContactRadius, TrackHalfAngle);
     private static readonly AOEShapeDonutSector InnerTrack = new(InnerRing - ContactRadius, InnerRing + ContactRadius, TrackHalfAngle);
@@ -95,13 +99,19 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
 
     private readonly Dictionary<ulong, MotionInfo> _motion = [];
     private readonly Dictionary<ulong, DateTime> _lastBaseline = [];
+    private readonly Dictionary<ulong, (WPos Pos, DateTime Time)> _initial = []; // registration position/time, used to measure the turn direction from the first MOVE
+    private readonly HashSet<ulong> _directionKnown = []; // storms whose turn direction has been measured; Register keeps it instead of the default
 
     public bool TryGetMotion(ulong instanceID, out MotionInfo info) => _motion.TryGetValue(instanceID, out info);
 
     public override void OnActorCreated(Actor actor)
     {
         if (actor.OID == (uint)OID.Hurricane)
+        {
+            _initial[actor.InstanceID] = (actor.Position, WorldState.CurrentTime);
+            _directionKnown.Remove(actor.InstanceID);
             Register(actor.InstanceID, actor.Position, WorldState.CurrentTime);
+        }
     }
 
     public override void OnActorDestroyed(Actor actor)
@@ -110,13 +120,20 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
         {
             _motion.Remove(actor.InstanceID);
             _lastBaseline.Remove(actor.InstanceID);
+            _initial.Remove(actor.InstanceID);
+            _directionKnown.Remove(actor.InstanceID);
         }
     }
 
     private void Register(ulong id, WPos pos, DateTime time)
     {
         var ring = (pos - Module.Arena.Center).Length() > RingThreshold ? OuterRing : InnerRing;
-        _motion[id] = new(pos, time, ring, ring >= RingThreshold ? 3f / OuterRing : 1.5f / InnerRing, ring >= RingThreshold ? 1f : -1f);
+        // keep a measured direction once established; otherwise fall back to the default (outer
+        // clockwise / inner counterclockwise) until the first MOVE allows measuring it for real
+        var known = _directionKnown.Contains(id);
+        var speed = known ? _motion[id].AngularSpeed : ring >= RingThreshold ? 3f / OuterRing : 1.5f / InnerRing;
+        var sign = known ? _motion[id].Sign : ring >= RingThreshold ? 1f : -1f;
+        _motion[id] = new(pos, time, ring, speed, sign);
         _lastBaseline[id] = time;
     }
 
@@ -135,8 +152,15 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
             {
                 Register(hurricane.InstanceID, hurricane.Position, now);
             }
+            // once the first MOVE packet arrives, measure the actual turn direction from the
+            // registration position + first displacement; the direction is random per encounter
+            if (!_directionKnown.Contains(hurricane.InstanceID) && _initial.TryGetValue(hurricane.InstanceID, out var initial)
+                && now > initial.Time.AddSeconds(MinDirectionDt) && (hurricane.Position - initial.Pos).LengthSq() > DetectMoveSq)
+            {
+                TryEstablishDirection(hurricane.InstanceID, initial, hurricane.Position, now);
+            }
             // the storm body itself is the contact AOE
-            _displayed.Add(new(Shape, hurricane.Position, color: Colors.Danger, actorID: hurricane.InstanceID,
+            _displayed.Add(new(Shape, hurricane.Position, actorID: hurricane.InstanceID,
                 shapeDistance: Shape.Distance(hurricane.Position, default)));
             // the arc of track it is about to sweep through (pairs live 50-65s, so stale registrations are simply not drawn)
             if (_motion.TryGetValue(hurricane.InstanceID, out info) && now <= info.StartTime.AddSeconds(70d))
@@ -144,11 +168,30 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
                 var angle = Angle.FromDirection(info.Predict(center, now) - center);
                 var rot = angle + info.Sign * TrackHalfAngle;
                 var track = info.RingRadius >= RingThreshold ? OuterTrack : InnerTrack;
-                _displayed.Add(new(track, center, rot, color: Colors.Danger, actorID: hurricane.InstanceID,
+                _displayed.Add(new(track, center, rot, actorID: hurricane.InstanceID,
                     shapeDistance: track.Distance(center, rot)));
             }
         }
         return CollectionsMarshal.AsSpan(_displayed);
+    }
+
+    private void TryEstablishDirection(ulong id, (WPos Pos, DateTime Time) initial, WPos current, DateTime now)
+    {
+        if (!_motion.TryGetValue(id, out var info))
+            return;
+        var center = Module.Arena.Center;
+        // signed angular displacement of the two points around the center; its sign is exactly the
+        // Sign used by MotionInfo.Predict (positive = the positive Angle direction)
+        var diff = (Angle.FromDirection(current - center) - Angle.FromDirection(initial.Pos - center)).Normalized();
+        if (Math.Abs(diff.Rad) < 0.05f)
+            return; // nearly radial first move (very unlikely): cannot measure a direction, keep the default
+        var sign = diff.Rad > 0f ? 1f : -1f;
+        var dt = (float)(now - initial.Time).TotalSeconds;
+        var defaultSpeed = info.RingRadius >= RingThreshold ? 3f / OuterRing : 1.5f / InnerRing;
+        var speed = dt >= 2f ? Math.Clamp(Math.Abs(diff.Rad) / dt, 0.05f, 0.5f) : defaultSpeed; // measured angular speed, clamped to sane bounds
+        _motion[id] = new(initial.Pos, initial.Time, info.RingRadius, speed, sign);
+        _directionKnown.Add(id);
+        _lastBaseline[id] = now;
     }
 }
 
@@ -190,24 +233,26 @@ sealed class HurricaneKnockbacks(BossModule module) : Components.GenericKnockbac
 
 // ICON 506 on a hurricane telegraphs its RendingWind cross ~4.1s before the cast starts, and the
 // storm keeps orbiting in between (up to 13y of travel), so the landing spot is extrapolated from
-// the registered circular motion. The cast itself is still drawn by KidnapperAOEs; the predicted
-// entry is dropped as soon as the cast starts so the two never duplicate.
+// the registered circular motion. The icon entry only records the deadline; every frame the landing
+// spot is recomputed from HurricaneHazards' current motion data, so once the measured turn
+// direction replaces the default (first MOVE), an already-drawn wrong prediction is redrawn
+// automatically. The cast itself is still drawn by KidnapperAOEs; the predicted entry is dropped
+// as soon as the cast starts so the two never duplicate.
 sealed class RendingWindTelegraphs(BossModule module) : Components.GenericAOEs(module)
 {
     private const float PredictionTime = 4.1f;
     private const uint TelegraphIcon = 506u;
     private static readonly AOEShapeCross Cross = new(60f, 4f);
-    private readonly List<(ulong ActorID, WPos Position, DateTime Activation)> _icons = [];
+    private readonly List<(ulong ActorID, DateTime Activation)> _icons = [];
     private readonly List<AOEInstance> _displayed = [with(8)];
 
     public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
     {
-        if (iconID != TelegraphIcon || actor.OID != (uint)OID.Hurricane || Module.FindComponent<HurricaneHazards>() is not { } hazards
-            || !hazards.TryGetMotion(actor.InstanceID, out var motion))
+        if (iconID != TelegraphIcon || actor.OID != (uint)OID.Hurricane)
             return;
         // a fresh icon overrides any previous prediction for the same storm
         _icons.RemoveAll(e => e.ActorID == actor.InstanceID);
-        _icons.Add((actor.InstanceID, motion.Predict(Module.Arena.Center, WorldState.FutureTime(PredictionTime)), WorldState.FutureTime(PredictionTime)));
+        _icons.Add((actor.InstanceID, WorldState.FutureTime(PredictionTime)));
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
@@ -221,6 +266,7 @@ sealed class RendingWindTelegraphs(BossModule module) : Components.GenericAOEs(m
     {
         _displayed.Clear();
         var now = WorldState.CurrentTime;
+        var hazards = Module.FindComponent<HurricaneHazards>();
         for (var i = _icons.Count - 1; i >= 0; --i)
         {
             var entry = _icons[i];
@@ -229,13 +275,17 @@ sealed class RendingWindTelegraphs(BossModule module) : Components.GenericAOEs(m
                 _icons.RemoveAt(i);
                 continue;
             }
+            // pull the current motion data every frame so a direction fix is picked up immediately
+            if (hazards is not { } h || !h.TryGetMotion(entry.ActorID, out var motion))
+                continue;
+            var pos = motion.Predict(Module.Arena.Center, entry.Activation);
             // the two fixed rotations form the eight-way cross pattern
             var rot = (-180f).Degrees();
-            _displayed.Add(new(Cross, entry.Position, rot, entry.Activation, color: Colors.Danger, actorID: entry.ActorID,
-                shapeDistance: Cross.Distance(entry.Position, rot)));
+            _displayed.Add(new(Cross, pos, rot, entry.Activation, actorID: entry.ActorID,
+                shapeDistance: Cross.Distance(pos, rot)));
             rot = (-135.005f).Degrees();
-            _displayed.Add(new(Cross, entry.Position, rot, entry.Activation, color: Colors.Danger, actorID: entry.ActorID,
-                shapeDistance: Cross.Distance(entry.Position, rot)));
+            _displayed.Add(new(Cross, pos, rot, entry.Activation, actorID: entry.ActorID,
+                shapeDistance: Cross.Distance(pos, rot)));
         }
         return CollectionsMarshal.AsSpan(_displayed);
     }
@@ -243,49 +293,60 @@ sealed class RendingWindTelegraphs(BossModule module) : Components.GenericAOEs(m
 
 // The gust-wall event object (0x1EBFA9) spawns on the arena rim and plays its animation at the
 // same moment as the breeze system-log message (11388), ~7.1s before the BC7A gust resolves - so
-// it is already possible to tell which way the wind will blow while it is still a breeze. The wind
-// always blows from the wall across the arena, so mark the whole downwind 3/4 of the floor as
-// dangerous as soon as the wall appears, keeping the upwind quarter safe. If the wall is never
-// observed (e.g. a log without EANM lines), fall back to the BC7A telegraph helper as the wind
-// source, which still gives the full cast lead time. The zone disappears when the gust resolves.
-sealed class WindWallHazards(BossModule module) : Components.GenericAOEs(module)
+// it is already possible to tell which way the wind will blow while it is still a breeze. Instead
+// of painting the whole downwind floor, show the very same knockback preview the cast-bar
+// GustKnockback uses (60x30 rect toward the arena + push arrow, wind blowing from the wall across
+// the arena) as soon as the wall appears. Once the BC7A telegraph starts, the existing
+// GustKnockback takes over and this preview is dropped, so both never draw at the same time.
+sealed class GustWallKnockbacks(BossModule module) : Components.GenericKnockback(module)
 {
-    private static readonly AOEShapeCone Downwind = new(60f, 135f.Degrees());
-    private readonly List<AOEInstance> _displayed = [with(2)];
+    private static readonly AOEShapeRect Shape = new(60f, 30f); // same rect as GustKnockback
+    private readonly List<Knockback> _displayed = [with(1)];
     private WPos _wallPos;
+    private bool _suppressed; // BC7A cast in progress - GustKnockback owns the preview
 
     public override void OnActorCreated(Actor actor)
     {
-        if (actor.OID == (uint)OID.WindWall)
+        if (actor.OID == (uint)OID.WindWall && !_suppressed)
             _wallPos = actor.Position;
     }
 
     public override void OnActorEAnim(Actor actor, uint state)
     {
-        if (actor.OID == (uint)OID.WindWall)
+        if (actor.OID == (uint)OID.WindWall && !_suppressed)
             _wallPos = actor.Position;
+    }
+
+    public override void OnActorDestroyed(Actor actor)
+    {
+        if (actor.OID == (uint)OID.WindWall)
+            _wallPos = default;
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.IsSpell(AID.GustTelegraph) && _wallPos == default)
-            _wallPos = caster.Position;
+        // BC7A telegraph started: the cast-bar knockback preview takes over, drop ours
+        if (spell.IsSpell(AID.GustTelegraph))
+        {
+            _suppressed = true;
+            _wallPos = default;
+        }
     }
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
         if (spell.IsSpell(AID.GustTelegraph))
-            _wallPos = default;
+            _suppressed = false;
     }
 
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor)
     {
         _displayed.Clear();
         if (_wallPos != default)
         {
-            // the wind blows from the wall across the arena (270-degree downwind cone)
+            // the wind blows from the wall across the arena
             var dir = Angle.FromDirection(Module.Arena.Center - _wallPos);
-            _displayed.Add(new(Downwind, _wallPos, dir, color: Colors.Danger, shapeDistance: Downwind.Distance(_wallPos, dir)));
+            _displayed.Add(new(_wallPos, 24f, WorldState.FutureTime(7.1d), Shape, dir, Kind.DirForward));
         }
         return CollectionsMarshal.AsSpan(_displayed);
     }
@@ -307,7 +368,7 @@ sealed class IslandKidnapperStates : StateMachineBuilder
             .ActivateOnEnter<HurricaneHazards>()
             .ActivateOnEnter<HurricaneKnockbacks>()
             .ActivateOnEnter<RendingWindTelegraphs>()
-            .ActivateOnEnter<WindWallHazards>()
+            .ActivateOnEnter<GustWallKnockbacks>()
             .ActivateOnEnter<GustKnockback>()
             .ActivateOnEnter<KidnapperRaidwides>();
     }
