@@ -73,23 +73,28 @@ sealed class ZombieGas(BossModule module) : Components.Voidzone(module, 5f,
     static module => module.Enemies((uint)OID.ZombieGas).Where(actor => !actor.IsDeadOrDestroyed));
 
 // Frost dive knockback poison rectangles (replay-verified 13_42_39.log): the boss reads 0xBC88
-// (CauterizeVisual, ~5.7s, 3 casts) while standing on the dive line z=140; on CST! the zombie-gas
-// orbs (0x4C47, the persistent 48263 grid entities, ~10y grid spacing, ~5y radius) are knocked
-// and each spreads 0xBC8B (Catching) ~2.1s later as a one-shot judgement. Every orb carves a
-// 50y-long, ~11y-wide rectangle along the z axis from its dive position to outside the arena:
-// orbs north of the dive line (z < 140) up toward z=85, orbs south (z > 140) down toward z=195.
-// Snapshot the orb positions when the dive cast starts (before the knockback moves them), clear
-// on the Catching resolution, and let PruneExpired be the fallback. Displayed translucent
-// (Colors.AOE, non-risky): pure warning - the AI does not need to dodge these.
+// (CauterizeVisual, ~5.7s, 3 casts) while standing on the dive line z=140; on CST! the knocked
+// zombie-gas orbs (0x4C47, the persistent 48263 grid entities, ~10y grid spacing, ~5y radius)
+// each spread 0xBC8B (Catching) ~1.8s later as a one-shot judgement. Note 0xBC8B has NO cast bar
+// (only the CST! resolution arrives), so no per-orb confirmation is possible. Every knocked orb
+// carves a 50y-long, ~11y-wide rectangle ALONG THE Z AXIS (rotation 0 = +Z) from its dive position
+// to outside the arena: orbs north of the dive line (z < 140) up toward z-50, orbs south (z > 140)
+// down toward z+50. Only orbs within 10y of the dive line get a lane (replay: knocked orbs sit at
+// line ±5y, never-knocked ones at ±15y/±25y), so the snapshot at the dive cast start never draws
+// fake lanes for orbs that were not knocked. On the 0xBC8B resolution everything clears;
+// PruneExpired is the fallback. Displayed translucent (Colors.AOE, non-risky): pure warning - the
+// AI does not dodge.
 sealed class DiveKnockbackToxins(BossModule module) : Components.GenericAOEs(module)
 {
-    private const double ResolveDelay = 2.1d; // Catching judgement lands ~2.1s after the dive's CST!
+    private const double ResolveDelay = 2.1d; // Catching judgement lands ~2.1s after the dive's CST! (replay ~1.8s)
     private const double ExpireAfterResolve = 1d; // keep the rectangles briefly after the judgement
-    private static readonly AOEShapeRect Shape = new(25f, 5.5f, 25f); // 50y long (25+25), ~11y wide
-    private static readonly Angle South = 90f.Degrees(); // +Z points south; north is -Z
+    private const float KnockbackBand = 10f; // orbs within this z-band of the dive line are knocked (replay: ±5 knocked, ±15/±25 not)
+    private static readonly AOEShapeRect Shape = new(25f, 5.5f, 25f); // 50y long (25+25), ~11y wide; length runs along z
     private readonly List<AOEInstance> _rects = [];
     private readonly List<AOEInstance> _displayed = [with(8)];
     private readonly HashSet<uint> _seenGlobalSequences = [];
+    private float _diveLineZ; // boss's z while casting 0xBC88 (stays at 140)
+    private DateTime _activation;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
@@ -104,19 +109,16 @@ sealed class DiveKnockbackToxins(BossModule module) : Components.GenericAOEs(mod
         if (spell.Action.ID != (uint)AID.CauterizeVisual || spell.EventHappened)
             return;
 
-        // Snapshot every live gas orb before the knockback moves it; center the 50y rectangle on
-        // the orb's dive line (25y toward the arena edge + 25y back), all oriented along z.
-        var diveLineZ = caster.Position.Z; // boss stays at z=140 for the whole dive
-        var activation = Module.CastFinishAt(spell).AddSeconds(ResolveDelay);
+        // Snapshot the gas orbs near the dive line before the knockback moves them; orbs farther
+        // than the band are never knocked and must not get a (fake) lane.
+        _diveLineZ = caster.Position.Z; // boss stays at z=140 for the whole dive
+        _activation = Module.CastFinishAt(spell).AddSeconds(ResolveDelay);
         _rects.Clear();
         foreach (var gas in Module.Enemies((uint)OID.ZombieGas))
         {
-            if (gas.IsDeadOrDestroyed)
+            if (gas.IsDeadOrDestroyed || MathF.Abs(gas.Position.Z - _diveLineZ) > KnockbackBand)
                 continue;
-            var off = gas.Position.Z < diveLineZ ? -25f : 25f; // north of the line -> up (z-), south -> down (z+)
-            var origin = gas.Position + new WDir(0f, off);
-            _rects.Add(new(Shape, origin, South, activation, color: Colors.AOE, actorID: gas.InstanceID,
-                shapeDistance: Shape.Distance(origin, South)));
+            AddRect(gas.Position);
         }
     }
 
@@ -127,6 +129,16 @@ sealed class DiveKnockbackToxins(BossModule module) : Components.GenericAOEs(mod
             return;
         _rects.Clear();
         ++NumCasts;
+    }
+
+    private void AddRect(WPos orb)
+    {
+        // Lane runs along z (rotation 0 = +Z): north orbs (z < dive line) up toward z-50, south
+        // orbs down toward z+50, centered 25y toward the arena edge + 25y back.
+        var off = orb.Z < _diveLineZ ? -25f : 25f; // north of the line -> up (z-), south -> down (z+)
+        var origin = orb + new WDir(0f, off);
+        _rects.Add(new(Shape, origin, default, _activation, color: Colors.AOE,
+            shapeDistance: Shape.Distance(origin, default)));
     }
 
     private void PruneExpired()
@@ -199,15 +211,18 @@ sealed class MovingNecrohaze(BossModule module) : Components.GenericAOEs(module)
 // Square arena (half-side 20): the persistent deathwall hugs the four edges, so warn with four
 // edge bands 10y thick (20..30 from center, matching the old circular donut) instead of a 20-30
 // circle, which would wrongly flag the square's interior corners as dead.
+// The rect length runs along its rotation axis (Angle 0 = +Z here): north/south bands (origin
+// z=±25) must run along X (rotation 90), east/west bands (origin x=±25) along Z (rotation 0) -
+// with the rotations swapped the four bands crossed the arena center as a cross (user-verified).
 sealed class NecrohazeBoundary(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeRect Shape = new(30f, 5f, 30f); // full edge plus corner overlap
     private readonly AOEInstance[] _aoe =
     [
-        new(Shape, module.Arena.Center + new WDir(0f, 25f), default), // south edge band (z 20..30; +Z is south)
-        new(Shape, module.Arena.Center + new WDir(0f, -25f), default), // north edge band
-        new(Shape, module.Arena.Center + new WDir(25f, 0f), 90f.Degrees()), // east edge band
-        new(Shape, module.Arena.Center + new WDir(-25f, 0f), 90f.Degrees()) // west edge band
+        new(Shape, module.Arena.Center + new WDir(0f, 25f), 90f.Degrees()), // south edge band: z 20..30, x -30..30
+        new(Shape, module.Arena.Center + new WDir(0f, -25f), 90f.Degrees()), // north edge band: z -30..-20
+        new(Shape, module.Arena.Center + new WDir(25f, 0f), default), // east edge band: x 20..30, z -30..30
+        new(Shape, module.Arena.Center + new WDir(-25f, 0f), default) // west edge band: x -30..-20
     ];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;

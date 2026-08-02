@@ -6,7 +6,8 @@ public enum OID : uint
 {
     Boss = 0x4C77, // R3.0, BNpcName 14801, morphing mage
     BoundaryController = 0x4DFD, // non-targetable controller at arena center
-    Helper = 0x233C
+    Helper = 0x233C,
+    DiveArrow = 0x1EC09B // EventObj type, hellward-bound dash direction indicator (spawns at 48343 cast start)
 }
 
 public enum AID : uint
@@ -82,7 +83,9 @@ sealed class MorphingMageAOEs(BossModule module) : ReplayValidatedCastAOEs(modul
     private static readonly AOEShapeDonut CyclonicRing = new(10f, 30f);
     private static readonly AOEShapeCone SupercellCone = new(60f, 45f.Degrees());
     private static readonly AOEShapeCircle SupercellCircle = new(8f);
-    private static readonly AOEShapeDonut SupercellInner = new(10f, 16f);
+    // Inner radius 8f, not 10f: the 8-10y band is lethal too (replay-indirect; user-measured
+    // 2026-08-02 - the old inner radius 10 marked it safe).
+    private static readonly AOEShapeDonut SupercellInner = new(8f, 16f);
     private static readonly AOEShapeDonut SupercellOuter = new(16f, 30f);
     private static readonly AOEShapeCross CycloneCross = new(60f, 8f);
 
@@ -90,18 +93,12 @@ sealed class MorphingMageAOEs(BossModule module) : ReplayValidatedCastAOEs(modul
     // Keep simultaneous casts dangerous, but later preview steps must not block AI movement yet.
     protected override double RiskyActivationWindow => 0.5d;
 
-    // The 2/4/6s breath cones start on the same frame, so grade them by order instead of time:
-    // only the first two are dangerous until the third becomes imminent on its own. The 1.1s
-    // "quick" triple (center/left/right) is handled by HellishBreathQuickSequence instead: those
-    // casts are pruned before they hit under the generic framework.
-    protected override bool RiskyByOrder(uint actionID) => actionID is (uint)AID.HellishBreathShort or (uint)AID.HellishBreathMedium or (uint)AID.HellishBreathLong;
-    protected override int RiskyCountByOrder => 2;
-
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
         (uint)AID.TongueOfFlame => new(Tongue),
         (uint)AID.HellfireFetch => new(Hellfire, true),
-        (uint)AID.HellishBreathShort or (uint)AID.HellishBreathMedium or (uint)AID.HellishBreathLong => new(HellishBreath),
+        (uint)AID.HellishBreathShort or (uint)AID.HellishBreathMedium or (uint)AID.HellishBreathLong
+            or (uint)AID.HellishBreathQuickCenter or (uint)AID.HellishBreathQuickLeft or (uint)AID.HellishBreathQuickRight => new(HellishBreath),
         (uint)AID.CyclonicRing => new(CyclonicRing),
         (uint)AID.ShapeshiftingSupercellConeLong or (uint)AID.ShapeshiftingSupercellConeShort => new(SupercellCone),
         (uint)AID.ShapeshiftingSupercellCircle or (uint)AID.ShapeshiftingSupercellExtraCircle => new(SupercellCircle),
@@ -110,118 +107,6 @@ sealed class MorphingMageAOEs(BossModule module) : ReplayValidatedCastAOEs(modul
         (uint)AID.CycloneCrossing => new(CycloneCross),
         _ => null
     };
-}
-
-// Hellish Breath "quick" triple (replay-verified 12_08_47.log, two rounds): the boss telegraphs
-// the whole round with a long 0xBCDA cast (5.7s, CST+ previews the round, CST! hits), then a
-// helper fires three 60y/60-degree cones with 0.8s casts ~2.1s apart - 0xBE16 center / 0xC5F5
-// right / 0xBE17 left, directions fixed relative to the boss facing (center 0 deg, right +60 deg,
-// left -60 deg). The ORDER IS NOT FIXED (round 1: center->right->left; round 2: left->right->center).
-// Each breath resolves via its quick cast CST! (1.10s delay; the boss also emits 0xBCDE-0xBCE0 on
-// the same tick). The 0.8s casts are so short that the generic cast-AOE framework prunes them
-// ~0.77s before they actually hit, so this component records the first actual quick direction and
-// predicts the two remaining fixed directions as pale placeholders, then refines each step as its
-// own quick cast arrives (order-independent: refinement targets the first unconfirmed step).
-sealed class HellishBreathQuickSequence(BossModule module) : Components.GenericAOEs(module)
-{
-    private sealed class BreathStep(Angle rotation, DateTime activation)
-    {
-        public uint ActionID; // 0 while a predicted placeholder
-        public Angle Rotation = rotation;
-        public DateTime Activation = activation;
-        public ulong ActorID; // 0 = placeholder, set once its quick cast lands
-    }
-
-    private static readonly AOEShapeCone Shape = new(60f, 30f.Degrees()); // matches MorphingMageAOEs.HellishBreath
-    private const double FollowupInterval = 2.1d; // replay-verified spacing between breaths
-    private const double RiskWindow = 2.2d; // first + next steps dangerous, the last preview-only
-    private const double ResolveTolerance = 1.5d; // CST! settles ~1.1s after CST+ (0.8s cast)
-    private readonly List<BreathStep> _steps = [with(3)];
-    private readonly List<AOEInstance> _displayed = [with(3)];
-    private Angle _bossFacing;
-
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
-    {
-        PruneExpired();
-        _displayed.Clear();
-        if (_steps.Count == 0)
-            return CollectionsMarshal.AsSpan(_displayed);
-
-        var deadline = _steps[0].Activation.AddSeconds(RiskWindow);
-        foreach (var step in _steps)
-        {
-            var risky = step.Activation <= deadline;
-            _displayed.Add(new(Shape, Module.Arena.Center, step.Rotation, step.Activation,
-                risky ? Colors.Danger : Colors.AOE, risky, step.ActorID, Shape.Distance(Module.Arena.Center, step.Rotation)));
-        }
-        return CollectionsMarshal.AsSpan(_displayed);
-    }
-
-    public override void Update() => PruneExpired();
-
-    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
-    {
-        if (spell.Action.ID == (uint)AID.HellishBreathVisual)
-        {
-            if (!spell.EventHappened)
-            {
-                _steps.Clear();
-                _bossFacing = spell.Rotation; // caster is the boss
-            }
-            return;
-        }
-
-        if (spell.Action.ID is not ((uint)AID.HellishBreathQuickCenter) and not ((uint)AID.HellishBreathQuickLeft) and not ((uint)AID.HellishBreathQuickRight))
-            return;
-
-        if (spell.EventHappened)
-        {
-            // CST! settles this breath; remove the matching (or earliest unsettled) step
-            var index = _steps.FindIndex(step => step.ActorID != 0 && step.ActionID == spell.Action.ID && step.Activation <= WorldState.FutureTime(ResolveTolerance));
-            if (index < 0)
-                index = _steps.FindIndex(step => step.ActorID != 0 && step.Activation <= WorldState.FutureTime(ResolveTolerance));
-            if (index >= 0)
-                _steps.RemoveAt(index);
-            ++NumCasts;
-            return;
-        }
-
-        if (_steps.Count == 0)
-        {
-            // First quick cast: publish the whole round - this actual direction first, then the
-            // two remaining fixed directions (relative to boss facing) as unconfirmed placeholders.
-            var firstOffset = (spell.Rotation - _bossFacing).Normalized();
-            var firstActivation = Module.CastFinishAt(spell);
-            _steps.Add(new(spell.Rotation, firstActivation) { ActionID = spell.Action.ID, ActorID = caster.InstanceID });
-            var stepIndex = 1;
-            foreach (var offset in new[] { -60f.Degrees(), 0f.Degrees(), 60f.Degrees() })
-            {
-                if (MathF.Abs((offset - firstOffset).Deg) < 1f)
-                    continue;
-                _steps.Add(new(_bossFacing + offset, firstActivation.AddSeconds(FollowupInterval * stepIndex++)));
-            }
-            return;
-        }
-
-        // Later quick cast: refine the first unconfirmed placeholder with actual direction/time.
-        var refineIndex = _steps.FindIndex(step => step.ActorID == 0 && step.ActionID == spell.Action.ID);
-        if (refineIndex < 0)
-            refineIndex = _steps.FindIndex(step => step.ActorID == 0);
-        if (refineIndex >= 0)
-        {
-            _steps[refineIndex].ActionID = spell.Action.ID;
-            _steps[refineIndex].Rotation = spell.Rotation;
-            _steps[refineIndex].Activation = Module.CastFinishAt(spell);
-            _steps[refineIndex].ActorID = caster.InstanceID;
-            _steps.Sort((left, right) => left.Activation.CompareTo(right.Activation));
-        }
-    }
-
-    private void PruneExpired()
-    {
-        var now = WorldState.CurrentTime;
-        _steps.RemoveAll(step => now > step.Activation.AddSeconds(1d));
-    }
 }
 
 // Made Magic creates four fixed helpers 7.8y from center (cardinal on one cast, diagonal on the
@@ -366,29 +251,58 @@ sealed class MadeMagic(BossModule module) : Components.GenericAOEs(module)
 sealed class BlackenedRain(BossModule module) : Components.RaidwideCast(module, (uint)AID.BlackenedRainVisual);
 sealed class DarkDealing(BossModule module) : Components.SingleTargetDelayableCast(module, (uint)AID.DarkDealing);
 
-// The 48343 HellwardBound cast telegraphs nothing useful: the boss teleports to the start of
-// segment 1 while casting, so a charge rectangle drawn at cast start points the wrong way (the
-// old HellwardBound ChargeAOEs and the old movement-tracking ChargeDashes both misled - the
-// teleport registered as a dash segment). Instead consume each 48344 HellwardBoundHit event,
-// which carries the authoritative dash segment: start = caster position, end = spell target,
-// rect half-width 5 (10y total width). The three segments resolve in order ~2.2s apart.
+// Hellward-bound dash path - arrow-chain reconstruction (2026-08-02): the boss reads 48343
+// (HellwardBound, ~5.7s; location field $6 = first dash start), teleports there, then dashes
+// three 10y-wide segments ~2.25s apart, each resolved by a 48344 (HellwardBoundHit) event
+// (start = caster position, end = spell target $8). Four 0x1EC09B EventObj arrows spawn at
+// 48343 CST+ and mark the WHOLE path as a chain (user-verified in-game + RFLG): each arrow's
+// heading POINTS AT THE NEXT path point (angle convention: 0 deg = south, CCW positive, CW
+// negative - BossMod's own). The chain starts at the arrow nearest the boss (its reading
+// position) and is strung along each heading: the next arrow is the unused one with the
+// smallest angle deviation from the heading (within 30 deg); with no arrow ahead the lane
+// extends along the heading to the arena edge. Round 1 (replay): arrow3(502.8,-312.8) h135 ->
+// arrow4(517.7,-327.7) -> arrow1(482.3,-327.7) h45 -> arrow2(517.7,-292.3) -> edge ~(480,-292) -
+// 4 segments (the first is the repositioning dash, which has no 48344; the 48344 trio covers
+// the last three). Round 2: arrow2(500,-314) h-180 -> edge; arrow1(500,-335) h-45 ->
+// arrow4(475,-310) h90 -> arrow3(525,-310) -> edge. Each 48344 drops the OLDEST segment in
+// order (immune to activation-estimate drift - the old time-based removal lagged a segment by
+// one round); after the last 48344 the final segment (no 48344 of its own) expires one dash
+// interval later, exactly when that dash resolves. 48344 refines per-segment only when the
+// chain failed to build. Risk grading by activation window: segments resolving within ~2.5s are
+// danger, the rest preview - but ALL segments are forbidden ground for the AI.
 sealed class HellwardBoundDashes(BossModule module) : Components.GenericAOEs(module)
 {
     private const float HalfWidth = 5f;
-    private const double DashLifetime = 8d; // covers the whole 3-segment sequence (~5.3s) plus margin
+    private const double FirstDashDelay = 2.2d; // CST! -> first dash (replay-measured 2.2-2.23s)
+    private const double DashInterval = 2.25d; // segment spacing (replay ~2.25s), staggers activations
+    private const double DashLifetime = 0.5d; // fallback margin only - segments are dropped by 48344 in order (was 2.5s, left the last one ~3s extra)
+    // Covers the whole 4-segment chain (~9s): during the telegraph (cast start to first dash,
+    // ~8.1s) all four rectangles show the danger marker; AI forbidden zones already cover every
+    // segment, activation weights still make nearer segments more urgent.
+    private const double RiskWindow = 9d;
+    private const float ArrowMatchAngle = 30f; // degrees: the next arrow must lie within this of the heading
     private readonly List<AOEInstance> _dashes = [];
+    private readonly List<(WPos Position, Angle Rotation)> _arrows = [with(4)]; // 0x1EC09B dash-direction arrows
+    private WPos _bossPos; // 48343 caster position = chain head reference
+    private WPos _diveStartLoc; // 48343's location field = first dash start (fallback)
+    private DateTime _firstDashAt; // estimated first dash resolution time
+    private bool _chainAttempted; // chain build attempted once per round
+    private bool _chainBuilt; // full chain drawn from arrows; false -> 48344 fallback
+    private int _resolvedCount; // 48344s seen this round; drives the order-based segment drops
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         PruneExpired();
+        TryBuildChain();
         var dashes = CollectionsMarshal.AsSpan(_dashes);
         var count = dashes.Length;
-        // Segments resolve in order; grade by sequence index: only the last two are the current
-        // and next hit, earlier ones already resolved and are dimmed for context.
+        // Risk by activation window: the segment resolving within ~2.5s (current + next dash) is
+        // danger, farther ones are translucent preview.
+        var riskyDeadline = WorldState.CurrentTime.AddSeconds(RiskWindow);
         for (var i = 0; i < count; ++i)
         {
             ref var aoe = ref dashes[i];
-            if (i >= count - 2)
+            if (aoe.Activation <= riskyDeadline)
             {
                 aoe.Color = Colors.Danger;
                 aoe.Risky = true;
@@ -402,6 +316,44 @@ sealed class HellwardBoundDashes(BossModule module) : Components.GenericAOEs(mod
         return dashes;
     }
 
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        // Every dash rectangle is forbidden ground for the AI - the whole path is lethal while
+        // each dash resolves (including the translucent preview segments, not just the danger
+        // window ones).
+        foreach (var aoe in ActiveAOEs(slot, actor))
+            hints.AddForbiddenZone(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation), aoe.Activation);
+    }
+
+    public override void Update()
+    {
+        TryBuildChain();
+        PruneExpired();
+    }
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID != (uint)AID.HellwardBound || spell.EventHappened)
+            return;
+        // New round: reset everything, then build the chain from the freshly spawned arrows (they
+        // arrive around the cast start, so TryBuildChain retries in Update until they are there).
+        _bossPos = caster.Position;
+        _diveStartLoc = spell.LocXZ;
+        _firstDashAt = Module.CastFinishAt(spell).AddSeconds(FirstDashDelay);
+        _dashes.Clear();
+        _arrows.Clear();
+        _chainAttempted = false;
+        _chainBuilt = false;
+        _resolvedCount = 0;
+        TryBuildChain();
+    }
+
+    public override void OnActorCreated(Actor actor)
+    {
+        if (actor.OID == (uint)OID.DiveArrow)
+            _arrows.Add((actor.Position, actor.Rotation)); // path point + heading to the next point
+    }
+
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
         if (spell.Action.ID != (uint)AID.HellwardBoundHit)
@@ -410,14 +362,140 @@ sealed class HellwardBoundDashes(BossModule module) : Components.GenericAOEs(mod
         if (spell.TargetXZ == default)
             return;
 
-        var start = caster.Position;
-        var dir = spell.TargetXZ - start;
+        // Each 48344 resolves the CURRENT dash: drop the oldest (front) segment immediately -
+        // order-based removal is immune to activation-estimate drift (the old "activation <= now"
+        // test lagged a segment by one round when the firstDashAt estimate was late by ~0.25s).
+        // Chain mode: 48344#1/#2/#3 drop chain segments 1/2/3; after the last one the remaining
+        // segment (the final dash, which has no 48344 of its own) is scheduled to expire one dash
+        // interval later - exactly when that dash resolves. Fallback mode: each 48344 also draws
+        // its own zero-inference segment (the dropped one is the previous dash's).
+        var now = WorldState.CurrentTime;
+        if (_dashes.Count != 0)
+            _dashes.RemoveAt(0);
+        if (!_chainBuilt)
+        {
+            AddSegment(caster.Position, spell.TargetXZ, now);
+        }
+        else if (_resolvedCount >= 2 && _dashes.Count != 0)
+        {
+            // last 48344 seen: the remaining segment resolves one dash interval from now
+            var last = _dashes[^1];
+            _dashes[^1] = last with { Activation = now.AddSeconds(DashInterval) };
+        }
+        ++_resolvedCount;
+    }
+
+    private void TryBuildChain()
+    {
+        if (_chainAttempted)
+            return;
+        if (_arrows.Count < 2)
+            return; // arrows spawn around the cast start; retried every update
+        _chainAttempted = true;
+        _chainBuilt = BuildChain();
+        if (!_chainBuilt)
+            AddSegment(_bossPos, _diveStartLoc, _firstDashAt); // cast-data first segment fallback
+    }
+
+    private bool BuildChain()
+    {
+        // Chain head: the arrow nearest the boss (its reading position). Then each arrow points
+        // at the next path point: pick the unused arrow with the smallest angle deviation from
+        // the heading (within 30 deg); with none, extend along the heading to the arena edge.
+        var count = _arrows.Count;
+        var head = -1;
+        var bestDist = float.MaxValue;
+        for (var i = 0; i < count; ++i)
+        {
+            var dist = (_arrows[i].Position - _bossPos).LengthSq();
+            if (dist < bestDist)
+            {
+                head = i;
+                bestDist = dist;
+            }
+        }
+        if (head < 0)
+            return false;
+
+        var used = new bool[count];
+        var current = head;
+        var order = 0;
+        var built = 0;
+        while (current >= 0)
+        {
+            used[current] = true;
+            var (pos, rot) = _arrows[current];
+            var next = -1;
+            var bestAngle = float.MaxValue;
+            for (var j = 0; j < count; ++j)
+            {
+                if (used[j])
+                    continue;
+                var delta = _arrows[j].Position - pos;
+                var len = delta.Length();
+                if (len < 0.01f)
+                    continue;
+                var angleDiff = MathF.Abs((delta.ToAngle() - rot).Normalized().Deg);
+                if (angleDiff <= ArrowMatchAngle && angleDiff < bestAngle)
+                {
+                    next = j;
+                    bestAngle = angleDiff;
+                }
+            }
+            if (next >= 0)
+            {
+                if (AddChainSegment(pos, _arrows[next].Position, order++))
+                    ++built;
+                current = next;
+            }
+            else
+            {
+                // no arrow ahead: extend along the heading to the arena edge
+                var edge = ExtendToArenaEdge(pos, rot.ToDirection());
+                if (AddChainSegment(pos, edge, order++))
+                    ++built;
+                current = -1;
+            }
+        }
+        return built > 0;
+    }
+
+    private bool AddChainSegment(WPos start, WPos end, int order)
+    {
+        var dir = end - start;
+        var length = dir.Length();
+        if (length < 0.01f)
+            return false;
+        var shape = new AOEShapeRect(length, HalfWidth);
+        var rotation = Angle.FromDirection(dir);
+        _dashes.Add(new(shape, start, rotation, _firstDashAt.AddSeconds(order * DashInterval), Colors.AOE, false, default,
+            shapeDistance: shape.Distance(start, rotation)));
+        return true;
+    }
+
+    private WPos ExtendToArenaEdge(WPos start, WDir dir)
+    {
+        // march along the heading until leaving the arena (25y radius; cap well beyond)
+        var pos = start;
+        for (var i = 0; i < 100; ++i)
+        {
+            var next = pos + dir * 0.5f;
+            if (!Arena.InBounds(next))
+                break;
+            pos = next;
+        }
+        return pos;
+    }
+
+    private void AddSegment(WPos start, WPos end, DateTime activation)
+    {
+        var dir = end - start;
         var length = dir.Length();
         if (length < 0.01f)
             return;
         var shape = new AOEShapeRect(length, HalfWidth);
         var rotation = Angle.FromDirection(dir);
-        _dashes.Add(new(shape, start, rotation, WorldState.CurrentTime, Colors.AOE, false, caster.InstanceID,
+        _dashes.Add(new(shape, start, rotation, activation, Colors.AOE, false, default,
             shapeDistance: shape.Distance(start, rotation)));
     }
 
@@ -435,7 +513,6 @@ sealed class AcceptNoImitatorsStates : StateMachineBuilder
         TrivialPhase()
             .ActivateOnEnter<LethalBoundary>()
             .ActivateOnEnter<MorphingMageAOEs>()
-            .ActivateOnEnter<HellishBreathQuickSequence>()
             .ActivateOnEnter<MadeMagic>()
             .ActivateOnEnter<BlackenedRain>()
             .ActivateOnEnter<DarkDealing>()
