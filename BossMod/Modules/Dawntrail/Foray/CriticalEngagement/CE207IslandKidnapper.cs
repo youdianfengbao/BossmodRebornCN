@@ -89,7 +89,7 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
     private const float InnerRing = 12f;
     private const float RingThreshold = 16f;
     private const float ContactRadius = 4.5f;
-    private static readonly Angle TrackHalfAngle = 60f.Degrees(); // 120 degrees of track ahead of the storm
+    private static readonly Angle TrackHalfAngle = 15f.Degrees(); // 30 degrees of track ahead of the storm (half-angle 15 deg)
     private const float BaselineDriftSq = 9f; // 3y of extrapolation error before re-anchoring
     private const float DetectMoveSq = 1f; // 1y of first MOVE displacement is enough to measure the turn direction
     private const double MinDirectionDt = 1d; // require at least 1s between registration and the first MOVE

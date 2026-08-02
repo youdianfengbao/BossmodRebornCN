@@ -80,33 +80,11 @@ sealed class WhatGoesAroundAOEs(BossModule module) : ReplayValidatedCastAOEs(mod
 // B84F is split across three helpers. The boss cast is the stable advance warning.
 sealed class DarkIV(BossModule module) : Components.RaidwideCast(module, (uint)AID.DarkIV);
 
-sealed class ElectricBoundary(BossModule module) : Components.GenericAOEs(module)
-{
-    private static readonly AOEShapeRect Shape = new(24.5f, 0.75f, 24.5f);
-    private readonly AOEInstance[] _aoes = Build(module.Arena.Center);
-
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoes;
-
-    private static AOEInstance[] Build(WPos center)
-    {
-        var result = new AOEInstance[4];
-        for (var i = 0; i < result.Length; ++i)
-        {
-            var normal = (i * 90f).Degrees().ToDirection();
-            var rotation = Angle.FromDirection(normal.OrthoL());
-            var origin = center + 23.75f * normal;
-            result[i] = new(Shape, origin, rotation, color: Colors.Danger, shapeDistance: Shape.Distance(origin, rotation));
-        }
-        return result;
-    }
-}
-
 sealed class WhatGoesAroundStates : StateMachineBuilder
 {
     public WhatGoesAroundStates(BossModule module) : base(module)
     {
         TrivialPhase()
-            .ActivateOnEnter<ElectricBoundary>()
             .ActivateOnEnter<WhatGoesAroundAOEs>()
             .ActivateOnEnter<DarkIV>();
     }
@@ -124,6 +102,8 @@ sealed class WhatGoesAroundStates : StateMachineBuilder
     GroupID = 1093u,
     NameID = 57u,
     SortOrder = 8)]
-// The electric fence is square: arena-control kills cluster at |z| ~= 24 and players reach the
-// square rim, so use a 24.5y square instead of the old 20y circle that clipped the lane mechanics.
-public sealed class WhatGoesAround(WorldState ws, Actor primary) : BossModule(ws, primary, new(224f, -860f), new ArenaBoundsSquare(24.5f));
+// The instakill boundary is a square of 21y (confirmed by in-game observation; the kill zone is
+// square, not circular, center 224,-860). Draw the battle area right up to that boundary; the old
+// 24.5y square and its electric fence overlay only showed dead zone between the fence and the kill
+// boundary.
+public sealed class WhatGoesAround(WorldState ws, Actor primary) : BossModule(ws, primary, new(224f, -860f), new ArenaBoundsSquare(21f));

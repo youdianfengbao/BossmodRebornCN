@@ -31,6 +31,11 @@ abstract class ReplayValidatedCastAOEs(BossModule module) : Components.GenericAO
     protected virtual int MaxDisplayed => int.MaxValue;
     protected virtual int MaxRisky => int.MaxValue;
     protected virtual double RiskyActivationWindow => double.PositiveInfinity;
+    // Some action groups reveal their whole sequence at once (e.g. three simultaneous cones).
+    // When RiskyByOrder matches, risk is graded purely by draw order (i < RiskyCountByOrder is
+    // dangerous) instead of by activation time. Defaults keep every other encounter unchanged.
+    protected virtual bool RiskyByOrder(uint actionID) => false;
+    protected virtual int RiskyCountByOrder => int.MaxValue;
     // Some mechanics split one timeline across several components. Let a component contribute an
     // earlier activation so later previews stay visible without becoming forbidden too soon.
     protected virtual DateTime? CompetingActivation => null;
@@ -59,9 +64,10 @@ abstract class ReplayValidatedCastAOEs(BossModule module) : Components.GenericAO
         for (var i = 0; i < count; ++i)
         {
             var aoe = _pending[i].AOE;
-            if (useRiskLimit)
+            var byOrder = RiskyByOrder(_pending[i].ActionID);
+            if (byOrder || useRiskLimit)
             {
-                var imminent = i < MaxRisky && aoe.Activation <= riskyDeadline;
+                var imminent = byOrder ? i < RiskyCountByOrder : i < MaxRisky && aoe.Activation <= riskyDeadline;
                 aoe.Color = imminent ? Colors.Danger : Colors.AOE;
                 aoe.Risky = imminent;
             }

@@ -88,16 +88,19 @@ sealed class AlgolAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 // The normal cone resolves at the end of its cast. Spinning Inhale then emits 15-degree ticks for
 // roughly five seconds after the visual cast; predict the next tick instead of dropping the hint at
 // cast finish. BBE7/C6FE only pull vegetables and must not drive player movement hints.
-// The sweep advances -15 degrees every 0.2s (replay-verified, one full turn), far too fast for a
-// per-tick telegraph to be readable, so during the cast we telegraph the whole 345 degrees at once,
-// hiding only the final 15-degree step (the gap) that the sweep will end at. Once the first tick
-// lands the gap itself is warned as well (full 360-degree circle), and the gap outline trails the
-// predicted tail so the player can follow the one spot that is safe at any instant.
+// The sweep is a 15-degree cone stepping -15 degrees (CCW) every 0.2s (replay-verified, one full
+// turn = 24 steps), tracked by linear slot number n (0-based): the danger zone is generated from
+// n = k onward - slots [k, k+2] in danger (dark yellow), [k+3, k+20] pale (18 slots), nothing
+// before k (already swept) or past the danger end n = 26 (the second lap's second slot; the sweep
+// never generates danger past 26). Slot n maps to sector i = ((n-1) mod 24) + 1 (n=0 -> sector 24,
+// n=25 -> sector 1, n=26 -> sector 2). While casting (k==0) the initial layout is danger 24/1/2,
+// pale 3..20, nothing on 21..23; k=24 wraps back to the same layout.
 // GenericKnockback does not feed the AI any forbidden zones by itself, so AddAIHints is overridden
 // here: players pulled by either cone are subsequently devoured, so the safe play is simply to
-// never stand in the cone. For the spinning version everything outside the moving 15-degree gap is
-// forbidden, which keeps the AI out of the swept sectors while giving it a valid destination (the
-// gap) to trail behind the sweep at every tick.
+// never stand in the cone. The spinning version forbids every not-yet-swept step, so the AI only
+// walks through already-swept ground instead of into the moving cone (the old 345-degree sweep
+// with a green 15-degree gap was AI-invisible: the gap was implicitly the goal, and the AI walked
+// into the danger zone along it).
 sealed class AlgolDrawIn(BossModule module) : Components.GenericKnockback(module)
 {
     private const float PullDistance = 12f;
@@ -105,12 +108,8 @@ sealed class AlgolDrawIn(BossModule module) : Components.GenericKnockback(module
     private static readonly Angle DefaultSpinStep = -15f.Degrees();
     private static readonly AOEShapeCone LongCone = new(60f, 15f.Degrees());
     private static readonly AOEShapeCone ShortCone = new(30f, 15f.Degrees());
-    // 345-degree telegraph covering the whole sweep except the final 15-degree step (the gap)
-    private static readonly AOEShapeCone SweepCone = new(30f, 172.5f.Degrees());
-    // the final 15-degree step: the sweep's expected landing spot, i.e. where the tail is heading
-    private static readonly AOEShapeCone GapCone = new(30f, 7.5f.Degrees());
-    // once the sweep is spinning even the gap is warned - no sector is safe to stay in
-    private static readonly AOEShapeCircle SpinCircle = new(30f);
+    // one 15-degree sweep step: same shape as the tick cone itself (30y, 15-degree width)
+    private static readonly AOEShapeCone SectorCone = new(30f, 7.5f.Degrees());
     private readonly List<Knockback> _active = [with(2)];
     private Knockback? _normal;
     private Knockback? _spinning;
@@ -136,30 +135,23 @@ sealed class AlgolDrawIn(BossModule module) : Components.GenericKnockback(module
     public override void Update() => PruneExpired();
 
     // GenericKnockback only draws the pull arrow for the own player; the cones themselves would be
-    // invisible on the arena. Draw the active cone (danger) and, for the spinning version, the sweep
-    // telegraph: a 345-degree sector with a 15-degree gap during the cast, the full circle once the
-    // sweep starts, with the gap outline always marking where the tail is heading.
+    // invisible on the arena. Draw the active cone (danger) and, for the spinning version, each
+    // displayed sweep slot individually: linear slot n from k up to min(k+20, 26), dark yellow for
+    // n in [k, k+2], pale for the rest, mapped to sector ((n-1) mod 24) + 1.
     public override void DrawArenaBackground(int pcSlot, Actor pc)
     {
         if (_normal is { } normal)
             LongCone.Draw(Arena, normal.Origin, normal.Direction);
-        if (_spinning is { } spinning)
+        if (_spinning is not { } spinning)
+            return;
+
+        var k = AttackedSectors;
+        var last = Math.Min(k + 20, 26); // danger zone end: never generate past the second lap's second slot
+        for (var n = k; n <= last; ++n)
         {
-            // gap center = expected landing spot of the final sweep step (cast direction before the
-            // first tick, predicted tail afterwards) - same prediction as the knockback itself
-            var gap = spinning.Direction;
-            if (_spinStarted)
-            {
-                // sweep is spinning: warn the whole circle, outline the moving gap to trail it
-                SpinCircle.Draw(Arena, spinning.Origin);
-                GapCone.Outline(Arena, spinning.Origin, gap, Colors.Safe);
-            }
-            else
-            {
-                // pre-cast: warn everything except the final 15 degrees the sweep will end at
-                SweepCone.Draw(Arena, spinning.Origin, gap + 180f.Degrees());
-                GapCone.Outline(Arena, spinning.Origin, gap, Colors.Safe);
-            }
+            var i = ((n - 1) % 24 + 24) % 24 + 1; // slot -> sector (1-based), n=0 -> sector 24
+            var color = n <= k + 2 ? Colors.Danger : Colors.AOE;
+            SectorCone.Draw(Arena, spinning.Origin, SectorDirection(i), color);
         }
     }
 
@@ -167,14 +159,39 @@ sealed class AlgolDrawIn(BossModule module) : Components.GenericKnockback(module
     {
         if (_normal is { } normal)
             hints.AddForbiddenZone(LongCone, normal.Origin, normal.Direction, normal.Activation);
-        if (_spinning is { } spinning)
+        if (_spinning is not { } spinning)
+            return;
+
+        var k = AttackedSectors;
+        var last = Math.Min(k + 20, 26); // same range as the drawn slots
+        for (var n = k; n <= last; ++n)
         {
-            // forbid everything except the 15-degree gap; the gap follows the sweep tail so the AI
-            // trails the sweep and always has a valid destination, whether or not the sweep started
-            var gap = spinning.Direction;
-            hints.AddForbiddenZone(SweepCone, spinning.Origin, gap + 180f.Degrees(), spinning.Activation);
+            var i = ((n - 1) % 24 + 24) % 24 + 1;
+            // every displayed slot (danger or pale) is forbidden; activation scales with its offset from the front
+            var activation = spinning.Activation.AddSeconds((n - k - 1) * SpinTickInterval);
+            hints.AddForbiddenZone(SectorCone, spinning.Origin, SectorDirection(i), activation);
         }
     }
+
+    // number of 15-degree steps already hit by the sweep (0 while casting, 1..24 once spinning):
+    // the CCW sweep steps -15 degrees per tick, so step k faces initial - (k-1)*15 degrees
+    private int AttackedSectors
+    {
+        get
+        {
+            if (!_spinStarted)
+                return 0;
+            // recompute from the last landed tick, unwrapping the [-180,180) normalization into a
+            // continuous 0..345-degree CCW sweep so the wrap-around step 24 (initial + 15) works
+            var sweepDeg = (_spinInitialDirection - _spinLastDirection).Normalized().Deg;
+            if (sweepDeg < 0f)
+                sweepDeg += 360f;
+            return (int)MathF.Round(sweepDeg / 15f) + 1;
+        }
+    }
+
+    // direction of sweep step i (1..24), CCW from the boss's initial facing by (i-1)*15 degrees
+    private Angle SectorDirection(int i) => _spinInitialDirection - (i - 1) * 15f.Degrees();
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
@@ -292,4 +309,6 @@ sealed class GluttonousCursefiendStates : StateMachineBuilder
     SortOrder = 4)]
 // Replay player positions and the 28.6y boundary hits show the arena is 28y, not 20y; the old
 // 20y circle clipped the outer halves of the long fire strips.
-public sealed class GluttonousCursefiend(WorldState ws, Actor primary) : BossModule(ws, primary, new(765f, 0f), new ArenaBoundsCircle(28f));
+// 2026-08-02: deathwall replay-measured at ~25y (24.42y survived / 25.52y lethal, see
+// MiasmaBoundary), so the arena bounds are tightened to 24.5f to keep a margin inside the wall.
+public sealed class GluttonousCursefiend(WorldState ws, Actor primary) : BossModule(ws, primary, new(765f, 0f), new ArenaBoundsCircle(24.5f));

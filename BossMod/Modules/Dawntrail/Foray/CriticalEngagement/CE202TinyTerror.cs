@@ -572,8 +572,13 @@ sealed class HolyGrowable(BossModule module) : Components.GenericKnockback(modul
 
 static class OrbPairMechanic {
     // Replay-verified (two full waves): the first pair pops 10s after the orbs spawn/tether and
-    // the remaining pairs follow in tether order every 3s; the 1.7s resolve cast then refines
-    // the final activation via UpdateActivation.
+    // the remaining pairs follow in order of increasing tether-line length (NOT tether arrival
+    // order - all four lines arrive in the same frame, and the actual pop order matches the
+    // pair-distance ascending order) every 3s; the 1.7s resolve cast then refines the final
+    // activation via UpdateActivation.
+    // Two-wave replay validation: the actual pop order equals the ascending pair distance; the
+    // 10s/3s constants themselves are correct, and the constant ~0.7s estimate bias comes from
+    // the server linking the orbs before the client TETH event arrives.
     private const double FirstResolveDelay = 10.0d;
     private const double ResolveStagger = 3.0d;
 
@@ -609,7 +614,13 @@ sealed class OrbPairTimeline(BossModule module) : BossComponent(module) {
         public DateTime ClearAt;
     }
 
+    // All four TETH 415 lines arrive in the same frame; the actual pop order equals the
+    // ascending pair distance, so pairs are collected here and built into entries in Update()
+    // once the whole wave's tethers have been received.
+    private readonly record struct PendingPair(OrbPairMechanic.Key Key, Kind Kind, WPos Origin, float Distance);
+
     private readonly List<Entry> entries = [];
+    private readonly List<PendingPair> pending = [];
     private readonly HashSet<OrbPairMechanic.Key> pairs = [];
     private readonly HashSet<uint> seenGlobalSequences = [];
 
@@ -662,7 +673,7 @@ sealed class OrbPairTimeline(BossModule module) : BossComponent(module) {
         }
 
         var distance = (target.Position - source.Position).Length();
-        entries.Add(new(key, kind.Value, WPos.Lerp(source.Position, target.Position, 0.5f), distance, OrbPairMechanic.EstimateActivation(WorldState, entries.Count)));
+        pending.Add(new(key, kind.Value, WPos.Lerp(source.Position, target.Position, 0.5f), distance));
     }
 
     public override void OnActorDeath(Actor actor) => RemoveActor(actor.InstanceID);
@@ -677,7 +688,29 @@ sealed class OrbPairTimeline(BossModule module) : BossComponent(module) {
         ResolveAt(kind.Value, caster);
     }
 
-    public override void Update() => PruneExpired();
+    public override void Update() {
+        PruneExpired();
+        BuildPendingEntries();
+    }
+
+    // The four TETH 415 lines arrive in the same frame, so building entries in arrival order
+    // misassigns orderIndex: the actual pop order equals the ascending tether-line length.
+    // Build them all here, ordered by pair distance ascending, to match the real sequence.
+    private void BuildPendingEntries() {
+        if (pending.Count == 0) {
+            return;
+        }
+
+        pending.Sort((left, right) => {
+            var result = left.Distance.CompareTo(right.Distance);
+            return result != 0 ? result : left.Key.First.CompareTo(right.Key.First);
+        });
+        var orderIndex = entries.Count;
+        foreach (var pair in pending) {
+            entries.Add(new(pair.Key, pair.Kind, pair.Origin, pair.Distance, OrbPairMechanic.EstimateActivation(WorldState, orderIndex++)));
+        }
+        pending.Clear();
+    }
 
     private static Kind? KindForAction(uint actionID) => actionID switch {
         (uint)AID.TinyFlare1 => Kind.Flare,
@@ -696,11 +729,23 @@ sealed class OrbPairTimeline(BossModule module) : BossComponent(module) {
     }
 
     private void UpdateActivation(Kind kind, Actor caster, DateTime activation) {
+        // Update only the single nearest matching entry: updating every position match would
+        // let a later pair's resolve cast refine an earlier pair's estimate (and vice versa).
+        Entry? nearest = null;
+        var nearestDistanceSq = float.MaxValue;
         foreach (var entry in entries) {
-            if (entry.Type == kind && entry.ClearAt == default && entry.Origin.AlmostEqual(caster.Position, 1.5f)) {
-                entry.Activation = activation;
-                entry.ActorID = caster.InstanceID;
+            if (entry.Type != kind || entry.ClearAt != default || !entry.Origin.AlmostEqual(caster.Position, 1.5f)) {
+                continue;
             }
+            var distanceSq = (entry.Origin - caster.Position).LengthSq();
+            if (distanceSq < nearestDistanceSq) {
+                nearestDistanceSq = distanceSq;
+                nearest = entry;
+            }
+        }
+        if (nearest != null) {
+            nearest.Activation = activation;
+            nearest.ActorID = caster.InstanceID;
         }
     }
 
@@ -735,6 +780,7 @@ sealed class OrbPairTimeline(BossModule module) : BossComponent(module) {
 
     private void ResetWave() {
         entries.Clear();
+        pending.Clear();
         pairs.Clear();
         seenGlobalSequences.Clear();
     }
@@ -777,23 +823,53 @@ sealed class FlareCombo(BossModule module) : Components.GenericAOEs(module) {
 }
 
 sealed class HolyCombo(BossModule module) : Components.GenericKnockback(module) {
+    // matches FlareCombo's flare radius (18y circle, AID.TinyFlare1; FlareCombo.Shape is private,
+    // so the value is duplicated here). A holy knockback can shove the player straight into a flare
+    // pair that resolves later (ResolveStagger is 3s - too late to run out), so the knockback's
+    // forbidden landing-spot check must also include those flare circles.
+    private const float FlareRadius = 18f;
     private readonly OrbPairTimeline timeline = module.FindComponent<OrbPairTimeline>()!;
 
     public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor) {
-        var upcoming = timeline.Upcoming(1);
-        if (upcoming.Count == 0 || upcoming[0].Type != OrbPairTimeline.Kind.Holy) {
-            return [];
+        // Scan the next four entries instead of only the first: a misestimated earlier entry
+        // (flare or holy) must not permanently occupy the sole warning slot. Show the first
+        // holy that is not stale; the ~0.7s constant estimate bias may make it slightly past
+        // due, so tolerate 0.5s of staleness. If every holy is stale (estimation ran early),
+        // fall back to the nearest one - showing it plainly beats showing nothing.
+        var upcoming = timeline.Upcoming(4);
+        var now = WorldState.CurrentTime;
+        var fallback = default(OrbPairTimeline.Entry?);
+        foreach (var next in upcoming) {
+            if (next.Type != OrbPairTimeline.Kind.Holy) {
+                continue;
+            }
+            fallback ??= next;
+            if (next.Activation > now.AddSeconds(-0.5d)) {
+                return new Knockback[1] { new(next.Origin, 15.0f, next.Activation, actorID: next.ActorID) };
+            }
         }
-
-        var next = upcoming[0];
-        return new Knockback[1] { new(next.Origin, 15.0f, next.Activation, actorID: next.ActorID) };
+        return fallback is { } stale ? new Knockback[1] { new(stale.Origin, 15.0f, stale.Activation, actorID: stale.ActorID) } : [];
     }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
         var knockbacks = ActiveKnockbacks(slot, actor);
         if (knockbacks.Length != 0) {
             ref readonly var knockback = ref knockbacks[0];
-            hints.AddForbiddenZone(new SDKnockbackInCircleAwayFromOrigin(Arena.Center, knockback.Origin, knockback.Distance, 19f), knockback.Activation);
+            // The forbidden zone covers landing outside the 19f safe circle (as before) and also
+            // landing inside any flare pair that resolves AFTER this holy knockback: without the
+            // latter, the AI picks a spot "safe for the knockback" that is knocked straight into
+            // the flare circle, which resolves ~3s later - too late to run out. Flares resolving
+            // at or before this knockback are excluded (their static zone already covers them and
+            // mixing them in would over-restrict). Activation stays the knockback's own time, so
+            // the zone is live (and most urgent) for the pre-knockback positioning decision.
+            var flareCenters = new WPos[4]; // at most 4 pairs per wave
+            var count = 0;
+            foreach (var next in timeline.Upcoming(4)) {
+                if (next.Type == OrbPairTimeline.Kind.Flare && next.ClearAt == default && next.Activation > knockback.Activation) {
+                    flareCenters[count++] = next.Origin;
+                }
+            }
+            hints.AddForbiddenZone(new SDKnockbackInCircleAwayFromOriginPlusAOECircles(Arena.Center, knockback.Origin, knockback.Distance, 19f, flareCenters, FlareRadius, count), knockback.Activation);
         }
     }
 }

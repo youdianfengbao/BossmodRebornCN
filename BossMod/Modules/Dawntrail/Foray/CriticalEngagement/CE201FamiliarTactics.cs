@@ -88,6 +88,11 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
 // must not be predicted from the boss visual: the moving blades can stop at arbitrary positions
 // and rotations. Track action + instance + activation so duplicate/late packets cannot remove a
 // different blade or a later wave from the same caster.
+// 2026-08-02 fix: mixed waves (cross/circle + aero + impact sequence) are displayed fully. The
+// old per-branch filters hid any non-aero entry beyond the 0.5s wave window and any non-impact
+// entry during the impact sequence, leaving real resolving AOEs invisible on the radar ("safe on
+// radar, actually lethal"); OnCastFinished also removed the warning on resync finish packets
+// before the AOE actually resolved.
 sealed class BladePatterns(BossModule module) : Components.GenericAOEs(module)
 {
     private const double WaveWindow = 0.5d;
@@ -101,6 +106,7 @@ sealed class BladePatterns(BossModule module) : Components.GenericAOEs(module)
     private static readonly AOEShapeCross Cross10 = new(60f, 5f);
     private static readonly AOEShapeRect AncientAeroRect = new(70f, 3f);
     private static readonly AOEShapeCircle ImpactCircle = new(25f);
+    private static readonly AOEShapeCircle ImpactAIShape = new(26f);
 
     private sealed class PendingAOE(uint actionID, AOEInstance aoe)
     {
@@ -125,36 +131,43 @@ sealed class BladePatterns(BossModule module) : Components.GenericAOEs(module)
         }
 
         // Impact helpers start one after another over roughly 7.2s. Keep the complete four-circle
-        // sequence visible, but make only the next two circles forbidden so the AI can progress
-        // through it. The time bound prevents a late/stale packet from joining a later sequence.
-        if (_pending[0].ActionID == (uint)AID.InspiritedImpact)
-        {
-            var deadline = _pending[0].AOE.Activation.AddSeconds(ImpactSequenceWindow);
-            var displayed = 0;
-            foreach (var entry in _pending)
-            {
-                if (entry.ActionID != (uint)AID.InspiritedImpact || entry.AOE.Activation > deadline || displayed == 4)
-                    continue;
-
-                var aoe = entry.AOE;
-                aoe.Risky = displayed < 2;
-                aoe.Color = aoe.Risky ? Colors.Danger : Colors.AOE;
-                _displayed.Add(aoe);
-                ++displayed;
-            }
-            return CollectionsMarshal.AsSpan(_displayed);
-        }
-
+        // sequence visible, but make only the next three circles forbidden so the AI can progress
+        // through it (the fourth circle becomes forbidden once the earlier ones resolve). Other
+        // blade actions mixed into the sequence are graded by their own activation (imminent =
+        // danger, later = translucent preview) instead of being hidden - a hidden cross/circle
+        // still resolves and would read as "safe on the radar" while actually lethal. The display
+        // window covers one full sequence/wave; later entries belong to a following mechanic.
+        var sequenceDeadline = _pending[0].AOE.Activation.AddSeconds(ImpactSequenceWindow);
         var waveDeadline = _pending[0].AOE.Activation.AddSeconds(WaveWindow);
+        var impactDisplayed = 0;
         foreach (var entry in _pending)
         {
-            if (entry.AOE.Activation > waveDeadline)
-                break;
+            if (entry.AOE.Activation > sequenceDeadline || _displayed.Count == 8)
+                break; // beyond one sequence/wave, or display cap (4-blade wave + impact circles)
 
-            var aoe = entry.AOE;
-            aoe.Color = Colors.Danger;
-            aoe.Risky = true;
-            _displayed.Add(aoe);
+            if (entry.ActionID == (uint)AID.InspiritedImpact)
+            {
+                var aoe = entry.AOE;
+                aoe.Risky = impactDisplayed < 3;
+                aoe.Color = aoe.Risky ? Colors.Danger : Colors.AOE;
+                _displayed.Add(aoe);
+                ++impactDisplayed;
+            }
+            else if (entry.AOE.Activation <= waveDeadline)
+            {
+                var aoe = entry.AOE;
+                aoe.Color = Colors.Danger;
+                aoe.Risky = true;
+                _displayed.Add(aoe);
+            }
+            else
+            {
+                // later steps (aero rects or other blades): translucent, non-risky preview
+                var aoe = entry.AOE;
+                aoe.Color = Colors.AOE;
+                aoe.Risky = false;
+                _displayed.Add(aoe);
+            }
         }
         return CollectionsMarshal.AsSpan(_displayed);
     }
@@ -163,8 +176,16 @@ sealed class BladePatterns(BossModule module) : Components.GenericAOEs(module)
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        base.AddAIHints(slot, actor, assignment, hints);
+        // Impact circles (25y displayed) are forbidden with a wider 26y shape so the pathfinding
+        // boundary around their edge cannot squeeze the player into the 25y damage radius.
         var risky = ActiveAOEs(slot, actor).ToArray().Where(aoe => aoe.Risky).ToArray();
+        foreach (var aoe in risky)
+        {
+            if (aoe.Shape == ImpactCircle)
+                hints.AddForbiddenZone(ImpactAIShape, aoe.Origin, aoe.Rotation, aoe.Activation);
+            else
+                hints.AddForbiddenZone(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation), aoe.Activation);
+        }
         if (risky.Length != 0)
             hints.GoalZones.Add(position => risky.All(aoe => !aoe.Check(position)) ? 20f : 0f);
     }
@@ -193,12 +214,13 @@ sealed class BladePatterns(BossModule module) : Components.GenericAOEs(module)
         {
             var now = WorldState.CurrentTime;
             var activation = Module.CastFinishAt(spell);
-            RemoveAll(spell.Action.ID, caster.InstanceID);
-            // CastInfo resynchronization emits finish -> start while the cast is still in progress.
-            // Only remember finishes that are actually at the resolution point, otherwise the
-            // immediately following corrected cast-start would be mistaken for a late packet.
+            // Only a genuine resolution removes the warning. CastInfo resynchronization emits
+            // finish -> start while the cast is still in progress; removing the warning there
+            // leaves the radar "safe" while the AOE still resolves on the player. The tombstone
+            // below then guards the corrected re-start only when this finish actually resolved.
             if (spell.EventHappened || activation <= now.AddSeconds(EventResolveTolerance))
             {
+                RemoveAll(spell.Action.ID, caster.InstanceID);
                 RememberResolved(spell.Action.ID, caster.InstanceID, activation, now);
             }
         }
