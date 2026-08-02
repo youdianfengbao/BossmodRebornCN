@@ -56,6 +56,31 @@ public sealed class SDKnockbackInAABBSquareAwayFromOrigin(WPos Center, WPos Orig
     public override bool RowIntersectsShape(WPos rowStart, WDir dx, float width, float cushion = default) => true;
 }
 
+// Mirror of AwayFromOrigin for attract-style knockbacks: the forbidden zone contains positions
+// whose pull destination (toward the origin) lands outside the square.
+[SkipLocalsInit]
+public sealed class SDKnockbackInAABBSquareTowardsOrigin(WPos Center, WPos Origin, float Distance, float HalfWidth) : ShapeDistance
+{
+    private readonly WPos center = Center;
+    private readonly WPos origin = Origin;
+    private readonly float halfWidth = HalfWidth;
+    private readonly float distance = Distance;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override bool Contains(in WPos p)
+    {
+        var toOrigin = origin - p;
+        var normalized = toOrigin.Normalized();
+        return normalized == default || !(p + distance * normalized).InSquare(center, halfWidth);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override float Distance(in WPos p) => Contains(p) ? 0f : 1f;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override bool RowIntersectsShape(WPos rowStart, WDir dx, float width, float cushion = default) => true;
+}
+
 [SkipLocalsInit]
 public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusRectAOE(WPos Center, WPos Origin, float Distance, float HalfWidth, WPos RectOrigin, WDir RectDirection, float LengthFront, float RectHalfWidth) : ShapeDistance
 {

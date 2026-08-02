@@ -35,10 +35,59 @@ public enum AID : uint
 
 sealed class LethalBoundary(BossModule module) : Components.GenericAOEs(module)
 {
-    private static readonly AOEShapeDonut Shape = new(20f, 30f);
+    // Death points cluster at 20.9-28.1y from center, so the lethal band is the 20-30 ring. The
+    // arena bounds are r20, which would clip a donut starting exactly at 20 into an invisible
+    // sliver; pull the inner edge slightly inside the arena so the fence is actually visible.
+    private static readonly AOEShapeDonut Shape = new(19.5f, 30f);
     private readonly AOEInstance[] _aoe = [new(Shape, module.Arena.Center)];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
+}
+
+// The spider web: the boss casts C4C1 on a daughter, then the link propagates daughter to
+// daughter (C4C2). Replay exposes it as real tether events (IDs 0x1A4 boss->daughter, 0x198
+// daughter->daughter); draw the live lines so players can see the web structure while the
+// daughters walk and before the funnel charge follows the web.
+sealed class ArachnidWeb(BossModule module) : BossComponent(module)
+{
+    private readonly List<(Actor Source, Actor Target)> _links = [];
+    private readonly HashSet<ulong> _seenSources = [];
+
+    public override void OnTethered(Actor source, in ActorTetherInfo tether)
+    {
+        if (tether.ID is not (0x1A4u or 0x198u))
+            return;
+        if (WorldState.Actors.Find(tether.Target) is not { } target)
+            return;
+
+        var sourceID = source.InstanceID;
+        var targetID = tether.Target;
+        _links.RemoveAll(l => l.Source.InstanceID == sourceID && l.Target.InstanceID == targetID
+            || l.Source.InstanceID == targetID && l.Target.InstanceID == sourceID);
+        _links.Add((source, target));
+        _seenSources.Add(source.InstanceID);
+    }
+
+    public override void OnUntethered(Actor source, in ActorTetherInfo tether)
+    {
+        var sourceID = source.InstanceID;
+        var targetID = tether.Target;
+        _links.RemoveAll(l => l.Source.InstanceID == sourceID && l.Target.InstanceID == targetID
+            || l.Source.InstanceID == targetID && l.Target.InstanceID == sourceID);
+    }
+
+    public override void OnActorDestroyed(Actor actor)
+    {
+        _links.RemoveAll(l => l.Source.InstanceID == actor.InstanceID || l.Target.InstanceID == actor.InstanceID);
+        _seenSources.Remove(actor.InstanceID);
+    }
+
+    public override void DrawArenaForeground(int pcSlot, Actor pc)
+    {
+        foreach (var (source, target) in _links)
+            if (!source.IsDeadOrDestroyed && !target.IsDeadOrDestroyed)
+                Arena.AddLine(source.Position, target.Position, Colors.Danger);
+    }
 }
 
 sealed class Conformity(BossModule module) : ReplayValidatedCastAOEs(module)
@@ -204,6 +253,7 @@ sealed class WebOfTerrorStates : StateMachineBuilder
     {
         TrivialPhase()
             .ActivateOnEnter<LethalBoundary>()
+            .ActivateOnEnter<ArachnidWeb>()
             .ActivateOnEnter<Conformity>()
             .ActivateOnEnter<ArachnidFunnel>()
             .ActivateOnEnter<BedrockUplift>()

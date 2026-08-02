@@ -23,14 +23,21 @@ public enum AID : uint {
 sealed class AllEyes(BossModule module) : Components.RaidwideCast(module, (uint)AID.AllEyes);
 sealed class Jettatura(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Jettatura, new AOEShapeCircle(8.0f));
 sealed class ColdStare(BossModule module) : Components.SimpleAOEs(module, (uint)AID.ColdStare, new AOEShapeCone(40.0f, 45.0f.Degrees()));
+// ARR confirms both are gaze casts: SeeNoEvil is a 30y boss-centered gaze, SinisterSight is the
+// accursed orb's 50y petrifying gaze. Players inside the range must look away from the eye; the
+// orb cast targets every player in the arena, which matches an un-avoided gaze hit.
+sealed class SeeNoEvil(BossModule module) : Components.CastGaze(module, (uint)AID.SeeNoEvil, range: 30f);
+sealed class SinisterSight(BossModule module) : Components.CastGaze(module, (uint)AID.SinisterSight, range: 50f);
 
 [SkipLocalsInit]
 sealed class EvilSeerStates : StateMachineBuilder {
     public EvilSeerStates(BossModule module) : base(module) {
         TrivialPhase()
             .ActivateOnEnter<AllEyes>()
+            .ActivateOnEnter<SeeNoEvil>()
             .ActivateOnEnter<Jettatura>()
-            .ActivateOnEnter<ColdStare>();
+            .ActivateOnEnter<ColdStare>()
+            .ActivateOnEnter<SinisterSight>();
     }
 }
 

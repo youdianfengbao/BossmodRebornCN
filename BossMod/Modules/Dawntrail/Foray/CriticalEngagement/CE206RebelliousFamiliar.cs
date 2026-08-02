@@ -140,16 +140,18 @@ sealed class RubyReflection(BossModule module) : Components.GenericAOEs(module)
 }
 
 // BCA0 telegraphs a 60y radial knockback that resolves as C162 when Ravenous Gods completes,
-// ~6s after the short telegraph ends. Keep the warning visible for the full setup so automation
-// can solve both knockbacks as one route instead of reacting during the final two seconds.
+// ~6s after the short telegraph ends. Replay displacement shows every player is pulled TOWARD the
+// circle helper (not pushed away): wave1 helper at (238,332) carried players 15y north, wave2
+// helper at (218,352) carried them 15y west. Keep the warning visible for the full setup so
+// automation can solve both knockbacks as one route instead of reacting during the final two
+// seconds.
 sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(module)
 {
     private static readonly AOEShapeCircle Shape = new(60f);
-    private const float Distance = 30f;
-    // The floor is a 24y square, but a destination exactly on that mathematical edge is not a
-    // reliable landing point (character radius, interpolation and path stopping tolerance can all
-    // leave the client just outside). Reserve 1.5y inside the square for both knockbacks.
-    private const float SafeHalfWidth = 22.5f;
+    private const float Distance = 15f;
+    // The electric fence kills at ~23.6y from center (replay death point), so reserve just half a
+    // yalm inside the 24y square for hitbox/interpolation tolerance.
+    private const float SafeHalfWidth = 23.5f;
     private const double HitDelay = 6.0d;
     private readonly List<Knockback> _casters = [];
     private readonly List<Knockback> _displayed = [with(4)];
@@ -184,7 +186,7 @@ sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(
                 center -= a;
                 origin -= a;
             }
-            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(center, origin, kb.Distance, SafeHalfWidth), kb.Activation);
+            hints.AddForbiddenZone(new SDKnockbackInAABBSquareTowardsOrigin(center, origin, kb.Distance, SafeHalfWidth), kb.Activation);
         }
     }
 
@@ -193,7 +195,7 @@ sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(
         if (spell.Action.ID == (uint)AID.CircularKnockbackTelegraph)
         {
             _casters.RemoveAll(k => k.ActorID == caster.InstanceID);
-            _casters.Add(new(spell.LocXZ, Distance, Module.CastFinishAt(spell).AddSeconds(HitDelay), Shape, spell.Rotation, Kind.AwayFromOrigin, actorID: caster.InstanceID));
+            _casters.Add(new(spell.LocXZ, Distance, Module.CastFinishAt(spell).AddSeconds(HitDelay), Shape, spell.Rotation, Kind.TowardsOrigin, actorID: caster.InstanceID));
         }
     }
 
@@ -213,19 +215,16 @@ sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(
     }
 }
 
-// Knockback rows 90/91 are selected per target: players on opposite sides of the center line are
-// pushed in opposite directions. A fixed left/right arrow would therefore be wrong for half of
-// the raid; derive the side from each player's position relative to the helper's cast direction.
-// BCA1 telegraphs the lateral knockback; the real hit (C163) lands ~5.1s after the short telegraph
-// ends. Its direction is perpendicular to the aside helper's radius, pointing toward the helper
-// that telegraphs the following circular knockback (verified across all three recorded waves), not
-// a per-player left/right split. Keep the arrow visible for the full setup and add a square-wall
-// forbidden zone so automation starts from a position that stays inside after the push.
+// BCA1 telegraphs the first knockback; the real hit (C163) lands ~5.1s after the short telegraph
+// ends. Replay displacement shows it also pulls every player TOWARD the aside helper: wave1 helper
+// at (258,352) carried players ~10-15y east, wave2 helper at (238,332) carried them north. Keep the
+// arrow visible for the full setup and add a square-wall forbidden zone so automation starts from a
+// position that stays inside after the pull.
 sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
 {
     private static readonly AOEShapeRect Shape = new(40f, 30f);
     private const float Distance = 15f;
-    private const float SafeHalfWidth = 22.5f;
+    private const float SafeHalfWidth = 23.5f;
     private const double HitDelay = 5.1d;
 
     private sealed class AsideSource(WPos asidePos, WPos circlePos, DateTime activation, ulong actorID)
@@ -235,13 +234,6 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
         public readonly DateTime Activation = activation;
         public readonly ulong ActorID = actorID;
 
-        public WDir PushDirection(WPos center)
-        {
-            var radial = AsidePos - center;
-            var perp = radial.OrthoL();
-            var towardCircle = CirclePos - center;
-            return towardCircle.Dot(perp) >= 0f ? perp.Normalized() : (-perp).Normalized();
-        }
     }
 
     private readonly List<AsideSource> _sources = [];
@@ -257,7 +249,9 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
         foreach (var source in _sources)
             if (source.Activation < circleActivation && now < source.Activation)
             {
-                push = Distance * source.PushDirection(Arena.Center);
+                // The pull displacement is radial toward the aside helper, so the same offset
+                // applies to every player during this wave.
+                push = Distance * (source.AsidePos - Arena.Center).Normalized();
                 return true;
             }
         push = default;
@@ -270,8 +264,7 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
         _displayed.Clear();
         foreach (var source in _sources)
         {
-            var dir = source.PushDirection(Arena.Center);
-            _displayed.Add(new(source.AsidePos, Distance, source.Activation, Shape, Angle.FromDirection(dir), Kind.DirForward, actorID: source.ActorID));
+            _displayed.Add(new(source.AsidePos, Distance, source.Activation, Shape, default, Kind.TowardsOrigin, actorID: source.ActorID));
         }
         return CollectionsMarshal.AsSpan(_displayed);
     }
@@ -282,8 +275,7 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
     {
         foreach (var source in _sources)
         {
-            var dir = source.PushDirection(Arena.Center);
-            hints.AddForbiddenZone(new SDKnockbackInAABBSquareFixedDirection(Arena.Center, Distance * dir, SafeHalfWidth), source.Activation);
+            hints.AddForbiddenZone(new SDKnockbackInAABBSquareTowardsOrigin(Arena.Center, source.AsidePos, Distance, SafeHalfWidth), source.Activation);
         }
     }
 
