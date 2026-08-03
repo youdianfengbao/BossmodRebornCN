@@ -1,6 +1,4 @@
-﻿using System.ComponentModel;
-
-namespace BossMod.Dawntrail.Foray.FATE.NH105EvilSeer;
+﻿namespace BossMod.Dawntrail.Foray.FATE.NH105EvilSeer;
 
 public enum OID : uint {
     EvilSeer = 0x4BA7,
@@ -34,10 +32,8 @@ sealed class EvilSeerStates : StateMachineBuilder {
     public EvilSeerStates(BossModule module) : base(module) {
         TrivialPhase()
             .ActivateOnEnter<AllEyes>()
-            .ActivateOnEnter<SeeNoEvil>()
             .ActivateOnEnter<Jettatura>()
-            .ActivateOnEnter<ColdStare>()
-            .ActivateOnEnter<SinisterSight>();
+            .ActivateOnEnter<ColdStare>();
     }
 }
 

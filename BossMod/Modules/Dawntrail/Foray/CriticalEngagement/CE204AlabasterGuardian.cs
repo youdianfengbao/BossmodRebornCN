@@ -66,8 +66,8 @@ sealed class AlabasterSlashes(BossModule module) : ReplayValidatedOppositeAOEs(m
         // boss facing 180 casts B83E with rotation 90 = its right side; hits land within +-90 deg
         // of the cast rotation, and the follow-up sweep lands on the opposite half). Adding a side
         // offset on top would rotate the pair into a front/back cleave, which is wrong.
-        (uint)AID.RightLeftSlash => new(Half, Half, (uint)AID.SweepLeft, 1.7d),
-        (uint)AID.LeftRightSlash => new(Half, Half, (uint)AID.SweepRight, 1.7d),
+        (uint)AID.RightLeftSlash => new(Half, Half, (uint)AID.SweepLeft, 2.20d),
+        (uint)AID.LeftRightSlash => new(Half, Half, (uint)AID.SweepRight, 2.20d),
         _ => null
     };
 }

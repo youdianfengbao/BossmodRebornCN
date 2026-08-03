@@ -17,7 +17,7 @@ public enum AID : uint
 {
     IdleVisual = 0xB949, // boss->event target, no effects
     AutoAttack = 0xB94A, // boss->player, no cast, single-target
-    WindBoundary = 0xB94B, // anchor, persistent 20-30y outer deathwall
+    WindBoundary = 0xB94B, // anchor, persistent outer deathwall; ARR player-center kills start at ~23y
     HurricaneVisual = 0xB94C,
     HurricaneKnockback = 0xB94D, // 5y directional knockback; the event rotation is the actual push direction, which sweeps ~10 deg/s
     RendingWindVisual = 0xB94E,
@@ -458,6 +458,12 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
     // 19f was the old 19y-wall value - keeping it would ban every landing beyond 19y and strand
     // the AI off the outer rim (landings up to 24.5y are actually safe now).
     private const float SafeRadius = 24.5f;
+    // Upstream knockback-destination safety: DestinationUnsafe rejects landings beyond
+    // LethalRadius (kept at the re-measured wall, 24.5f); PreferredStart biases the AI's start
+    // position toward the wall so the push lands it centrally.
+    private const float LethalRadius = 24.5f;
+    private const float PreferredStartDistance = 20.5f;
+    private const float PreferredStartRadius = 2f;
     // Replay event timing is consistently about 0.60s after the helper cast finishes. Using the
     // old 1.05s estimate scheduled the safe-edge constraint roughly 0.4s after the real knockback.
     private const double HitDelay = 0.60d;
@@ -472,7 +478,13 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         foreach (var kb in _casters)
-            hints.AddForbiddenZone(new SDKnockbackInCircleFixedDirection(Arena.Center, Distance * kb.Direction.ToDirection(), SafeRadius), kb.Activation);
+        {
+            var displacement = Distance * kb.Direction.ToDirection();
+            var center = Arena.Center;
+            hints.AddForbiddenZone(new SDKnockbackInCircleFixedDirection(center, displacement, SafeRadius), kb.Activation);
+            var preferredStart = center - PreferredStartDistance * kb.Direction.ToDirection();
+            hints.GoalZones.Add(position => position.InCircle(preferredStart, PreferredStartRadius) ? 5f : 0f);
+        }
     }
 
     public override void AddHints(int slot, Actor actor, TextHints hints)
@@ -485,6 +497,8 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
         if (tank != null && !tank.IsDeadOrDestroyed && (tank.Position - Module.Arena.Center).Length() < 5f)
             hints.Add("主坦克站在中场——阵风会把全队推出边界！");
     }
+
+    public override bool DestinationUnsafe(int slot, Actor actor, WPos pos) => !pos.InCircle(Arena.Center, LethalRadius);
 
     public override void Update() => PruneExpired();
 

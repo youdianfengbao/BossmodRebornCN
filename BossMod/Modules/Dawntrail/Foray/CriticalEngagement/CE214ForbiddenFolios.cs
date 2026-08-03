@@ -5,10 +5,10 @@ namespace BossMod.Dawntrail.Foray.CriticalEngagement.CE214ForbiddenFolios;
 public enum OID : uint
 {
     Boss = 0x4BD3, // R6.0, BNpcName 14520, forbidden folios
-    Pages64 = 0x4BD4, // R1.0, 64 pages (base knowledge level 6)
-    Pages16 = 0x4BD5, // R1.0, 16 pages (base knowledge level 4)
-    Pages8 = 0x4BD6, // R1.0, 8 pages (base knowledge level 3)
-    Pages512 = 0x4BD7, // R1.0, 512 pages (base knowledge level 9)
+    Pages64 = 0x4BD4, // R1.0, 64 pages - announces level-5 death sector
+    Pages16 = 0x4BD5, // R1.0, 16 pages - announces level-3 flare sector
+    Pages8 = 0x4BD6, // R1.0, 8 pages - announces level-4 holy sector
+    Pages512 = 0x4BD7, // R1.0, 512 pages - announces prime-death sector
     BookTrap = 0x4BD8, // R1.0, book-drop trap
     Helper = 0x233C
 }
@@ -70,26 +70,22 @@ public enum SID : uint
 // writing and the four-yalm page landing circles.
 sealed class BasicAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 {
-    private static readonly AOEShapeCircle Blot = new(9.5f);
-    private static readonly AOEShapeCircle BookDrop = new(3f);
+    private static readonly AOEShapeCircle Blot = new(15f);
     private static readonly AOEShapeCircle SummonPages = new(4f);
     private static readonly AOEShapeCross QuadRule = new(25f, 5f);
     private static readonly AOEShapeCone FireII = new(60f, 22.5f.Degrees());
 
-    // Blot/book-drop grids expose several waves up front at two-second intervals. With the
-    // corrected 9.5y ink radius the adjacent waves leave real gaps, so planning two seconds ahead
-    // no longer covers the arena and automation can weave through.
-    // Both batches resolve two seconds apart; leaving the second batch risky only 0.25s early gave
-    // automation no time to dodge. The lanes sit at the arena frame, so planning both batches
-    // together still leaves the center safe and does not oscillate.
-    protected override double RiskyActivationWindow => 2.0d;
+    // Blot exposes three rows of three circles at roughly two-second intervals. The opener is
+    // "third into first": both of the first two rows must be forbidden so the third row is the
+    // only pre-position, then the first row becomes available after it resolves. Replay cast-start
+    // spacing reaches 2.026s, so a literal 2.0s cutoff incorrectly made the second row look safe.
+    protected override double RiskyActivationWindow => 2.25d;
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
         (uint)AID.Blot => new(Blot, true),
         (uint)AID.QuadRule => new(QuadRule, true),
         (uint)AID.SummonPages => new(SummonPages),
-        (uint)AID.BookDrop => new(BookDrop),
         (uint)AID.FireII => new(FireII),
         _ => null
     };
@@ -264,22 +260,25 @@ sealed class HorizontalRule(BossModule module) : Components.GenericAOEs(module)
     }
 }
 
-// Page counts are powers of two, so their base knowledge levels are log2(page count): 8->3,
-// 16->4, 64->6 and 512->9. The player's correction status is added to that base, and a sector is
-// dangerous only when the resulting personal level fails that sector's rule. This must remain a
-// per-player ActiveAOEs calculation; globally painting every sector red is mechanically wrong.
+// The three (sometimes two) page actors each announce a sector type via NPC yell, then a helper
+// casts the corresponding cone. The cone originates at the page's own position (12.5y from center)
+// and faces the arena center; replay victims all sit inside a 25y cone from the page toward the
+// center (half-angle 60 for 120-degree sectors, 90 for the 180-degree wide variants). A player's
+// final knowledge level is the absolute account-wide progress (ForayInfo.Level, 20-40) plus the
+// per-round correction status; a sector is dangerous only when that final level satisfies the
+// sector's rule (final % N == 0, or prime for the prime sectors). This must remain a per-player
+// ActiveAOEs calculation; globally painting every sector red is mechanically wrong.
 sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module)
 {
     private enum SectorKind { Level3, Level4, Level4Wide, Level5, Prime, PrimeWide }
-    private readonly record struct SectorConfig(SectorKind Kind, AOEShape Shape);
+    private readonly record struct SectorConfig(SectorKind Kind, AOEShape Shape, OID PageOID);
 
-    private sealed class PendingSector(SectorKind kind, AOEShape shape, Angle rotation, DateTime activation, int? baseLevel, ulong casterID)
+    private sealed class PendingSector(SectorKind kind, AOEShape shape, Angle rotation, DateTime activation, ulong casterID)
     {
         public readonly SectorKind Kind = kind;
         public readonly AOEShape Shape = shape;
         public readonly Angle Rotation = rotation;
         public readonly DateTime Activation = activation;
-        public int? BaseLevel = baseLevel;
         public readonly HashSet<ulong> Casters = [casterID];
     }
 
@@ -294,17 +293,29 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
         PruneExpired();
         _displayed.Clear();
         var correction = Correction(actor);
-        if (correction == 0)
-            return CollectionsMarshal.AsSpan(_displayed);
+        // If the knowledge level or the correction status is unavailable (e.g. ForayInfo memory
+        // read failed and Level stayed 0), we cannot tell which sectors are safe for this player.
+        // Never return empty - fall back to painting every sector dangerous so the player still
+        // gets warned.
+        var unknown = actor.ForayInfo.Level <= 0 || correction == 0;
+        var level = actor.ForayInfo.Level + correction;
 
         foreach (var sector in _pending)
         {
-            sector.BaseLevel ??= BaseLevelForRotation(sector.Rotation);
-            if (sector.BaseLevel is not int baseLevel || SatisfiesRule(baseLevel + correction, sector.Kind))
+            // The knowledge cone radiates from the boss (arena center) toward the announced
+            // direction; the page merely announces which rule the sector uses.
+            var direction = sector.Rotation;
+            if (!unknown && SatisfiesRule(level, sector.Kind))
+            {
+                // This sector is safe for this player: outline it green so the eye can see where to
+                // stand, without making it risky for automation.
+                _displayed.Add(new(sector.Shape, Module.Arena.Center, direction, sector.Activation,
+                    Colors.Safe, false, sector.Casters.FirstOrDefault(), sector.Shape.Distance(Module.Arena.Center, direction)));
                 continue;
+            }
 
-            _displayed.Add(new(sector.Shape, Module.Arena.Center, sector.Rotation, sector.Activation,
-                actorID: sector.Casters.FirstOrDefault(), shapeDistance: sector.Shape.Distance(Module.Arena.Center, sector.Rotation)));
+            _displayed.Add(new(sector.Shape, Module.Arena.Center, direction, sector.Activation,
+                actorID: sector.Casters.FirstOrDefault(), shapeDistance: sector.Shape.Distance(Module.Arena.Center, direction)));
         }
         return CollectionsMarshal.AsSpan(_displayed);
     }
@@ -316,7 +327,15 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
             return;
 
         var correction = Correction(actor);
-        hints.Add(correction == 0 ? "Knowledge correction unavailable" : $"Knowledge correction +{correction}", correction == 0);
+        var unknown = actor.ForayInfo.Level <= 0 || correction == 0;
+        if (unknown)
+        {
+            hints.Add("Knowledge level unavailable - all sectors marked dangerous", true);
+            return;
+        }
+
+        var level = actor.ForayInfo.Level + correction;
+        hints.Add($"Knowledge level {level} (base {actor.ForayInfo.Level} + {correction})");
     }
 
     public override void Update() => PruneExpired();
@@ -332,15 +351,15 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
             return;
 
         var existing = _pending.FirstOrDefault(sector => sector.Kind == config.Kind
-            && sector.Rotation.AlmostEqual(spell.Rotation, 2f.Degrees().Rad)
-            && Math.Abs((sector.Activation - activation).TotalSeconds) <= 0.25d);
+            && Math.Abs((sector.Activation - activation).TotalSeconds) <= 0.25d
+            && sector.Rotation.AlmostEqual(spell.Rotation, Angle.DegToRad));
         if (existing != null)
         {
             existing.Casters.Add(caster.InstanceID);
             return;
         }
 
-        _pending.Add(new(config.Kind, config.Shape, spell.Rotation, activation, BaseLevelForRotation(spell.Rotation), caster.InstanceID));
+        _pending.Add(new(config.Kind, config.Shape, spell.Rotation, activation, caster.InstanceID));
         _pending.Sort((left, right) => left.Activation.CompareTo(right.Activation));
     }
 
@@ -364,12 +383,12 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
 
     private static SectorConfig? ConfigFor(uint actionID) => actionID switch
     {
-        (uint)AID.KnowledgeLevel3Flare or (uint)AID.KnowledgeLevel3FlareAlt => new(SectorKind.Level3, Sector120),
-        (uint)AID.KnowledgeLevel4Holy or (uint)AID.KnowledgeLevel4HolyAlt => new(SectorKind.Level4, Sector120),
-        (uint)AID.KnowledgeLevel4HolyWide or (uint)AID.KnowledgeLevel4HolyWideAlt => new(SectorKind.Level4Wide, Sector180),
-        (uint)AID.KnowledgeLevel5Death or (uint)AID.KnowledgeLevel5DeathAlt => new(SectorKind.Level5, Sector120),
-        (uint)AID.PrimeKnowledgeLevelDeath or (uint)AID.PrimeKnowledgeLevelDeathAlt => new(SectorKind.Prime, Sector120),
-        (uint)AID.PrimeKnowledgeLevelDeathWide or (uint)AID.PrimeKnowledgeLevelDeathWideAlt => new(SectorKind.PrimeWide, Sector180),
+        (uint)AID.KnowledgeLevel3Flare or (uint)AID.KnowledgeLevel3FlareAlt => new(SectorKind.Level3, Sector120, OID.Pages16),
+        (uint)AID.KnowledgeLevel4Holy or (uint)AID.KnowledgeLevel4HolyAlt => new(SectorKind.Level4, Sector120, OID.Pages8),
+        (uint)AID.KnowledgeLevel4HolyWide or (uint)AID.KnowledgeLevel4HolyWideAlt => new(SectorKind.Level4Wide, Sector180, OID.Pages8),
+        (uint)AID.KnowledgeLevel5Death or (uint)AID.KnowledgeLevel5DeathAlt => new(SectorKind.Level5, Sector120, OID.Pages64),
+        (uint)AID.PrimeKnowledgeLevelDeath or (uint)AID.PrimeKnowledgeLevelDeathAlt => new(SectorKind.Prime, Sector120, OID.Pages512),
+        (uint)AID.PrimeKnowledgeLevelDeathWide or (uint)AID.PrimeKnowledgeLevelDeathWideAlt => new(SectorKind.PrimeWide, Sector180, OID.Pages512),
         _ => null
     };
 
@@ -384,8 +403,8 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
     }
 
     // Replay-verified: the sectors are named 知见3级核爆 / 知见4级神圣 / 知见5级即死 / 知见质数即死,
-    // and every recorded victim died in a sector whose condition their final knowledge level satisfied.
-    // The sector is therefore SAFE only when the condition does NOT hold.
+    // and every recorded victim died in a sector whose condition their final absolute knowledge
+    // level satisfied. The sector is therefore SAFE only when the condition does NOT hold.
     private static bool SatisfiesRule(int level, SectorKind kind) => kind switch
     {
         SectorKind.Level3 => level % 3 != 0,
@@ -405,36 +424,6 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
         return true;
     }
 
-    private int? BaseLevelForRotation(Angle rotation)
-    {
-        int? result = null;
-        var bestDelta = float.MaxValue;
-        foreach (var page in WorldState.Actors.Actors.Values)
-        {
-            var level = page.OID switch
-            {
-                (uint)OID.Pages8 => 3,
-                (uint)OID.Pages16 => 4,
-                (uint)OID.Pages64 => 6,
-                (uint)OID.Pages512 => 9,
-                _ => 0
-            };
-            if (level == 0 || page.IsDeadOrDestroyed)
-                continue;
-
-            var direction = page.Position - Module.Arena.Center;
-            if (direction.LengthSq() < 0.01f)
-                continue;
-            var delta = Math.Abs((Angle.FromDirection(direction) - rotation).Normalized().Rad);
-            if (delta < bestDelta)
-            {
-                bestDelta = delta;
-                result = level;
-            }
-        }
-        return result;
-    }
-
     private void RemoveCaster(ulong casterID)
     {
         for (var i = _pending.Count - 1; i >= 0; --i)
@@ -452,9 +441,12 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
     }
 }
 
-// Unbound Ink is a soak tower for a single player; drawing it as a red avoidable circle made
-// automation run away from it. CastTowers renders it as a tower and steers one player inside.
-sealed class UnboundInkTower(BossModule module) : Components.CastTowers(module, (uint)AID.UnboundInk, 9f, 1, 1);
+// Replay/operator correction: Unbound Ink (泼墨) is a steel-style avoidable 9y circle - victims
+// stood inside it and died - not a soak tower. BookDrop (丢书) is the actual tower players must
+// stand in (victims cluster inside each 3y book). Draw Unbound Ink as a red circle and BookDrop
+// as a tower.
+sealed class UnboundInk(BossModule module) : Components.SimpleAOEs(module, (uint)AID.UnboundInk, new AOEShapeCircle(9f));
+sealed class BookDropTower(BossModule module) : Components.CastTowers(module, (uint)AID.BookDrop, 3f, 1, 2);
 
 // The three B8DF helpers carry duplicate damage packets; the boss cast is the stable warning.
 sealed class Marginalia(BossModule module) : Components.RaidwideCast(module, (uint)AID.Marginalia);
@@ -469,7 +461,8 @@ sealed class ForbiddenFoliosStates : StateMachineBuilder
             .ActivateOnEnter<ThunderII>()
             .ActivateOnEnter<HorizontalRule>()
             .ActivateOnEnter<KnowledgeSectors>()
-            .ActivateOnEnter<UnboundInkTower>()
+            .ActivateOnEnter<UnboundInk>()
+            .ActivateOnEnter<BookDropTower>()
             .ActivateOnEnter<Marginalia>();
     }
 }

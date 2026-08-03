@@ -160,16 +160,21 @@ sealed class BuyersRemorseECFreeze(BossModule module) : Components.StayMove(modu
 sealed class WhatreYouBuying(BossModule module) : Components.GenericAOEs(module)
 {
     private readonly (WPos dropofflocation, int required, int current)[] playerData = new (WPos, int, int)[PartyState.MaxPartySize];
-    private readonly List<AOEInstance>[] _aoesPerPlayer = new List<AOEInstance>[PartyState.MaxPartySize];
+    private readonly List<AOEInstance>?[] _aoesPerPlayer = new List<AOEInstance>?[PartyState.MaxPartySize];
     private static readonly AOEShapeCircle circle = new(7f), circleInv = new(7f, true);
 
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => playerData[slot] != default ? CollectionsMarshal.AsSpan(_aoesPerPlayer[slot]) : [];
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        if (playerData[slot] == default || _aoesPerPlayer[slot] is not { } aoes)
+            return [];
+        return CollectionsMarshal.AsSpan(aoes);
+    }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
         if (spell.Action.ID is (uint)AID.WhatreYouBuyingVisual1 or (uint)AID.WhatreYouBuyingVisual2)
         {
-            var aoes = new AOEInstance[3];
+            var aoes = new List<AOEInstance>(3);
             uint[] towerOIDs = [(uint)OID.GemBlue, (uint)OID.GemRed, (uint)OID.Shell];
             var act = WorldState.FutureTime(10d);
             for (var i = 0; i < 3; ++i)
@@ -177,7 +182,7 @@ sealed class WhatreYouBuying(BossModule module) : Components.GenericAOEs(module)
                 var tower = Module.Enemies(towerOIDs[i]);
                 if (tower.Count != 0)
                 {
-                    aoes[i] = new(circle, tower[0].Position, default, act);
+                    aoes.Add(new(circle, tower[0].Position, default, act));
                 }
             }
             for (var i = 0; i < 8; ++i)
@@ -234,10 +239,10 @@ sealed class WhatreYouBuying(BossModule module) : Components.GenericAOEs(module)
             pSlot.current = coins;
             var delta = pSlot.required - pSlot.current;
 
-            if (delta <= 0)
+            if (delta <= 0 && _aoesPerPlayer[slot] is { } playerAOEs)
             {
-                var aoes = CollectionsMarshal.AsSpan(_aoesPerPlayer[slot]);
-                for (var i = 0; i < 3; ++i)
+                var aoes = CollectionsMarshal.AsSpan(playerAOEs);
+                for (var i = 0; i < aoes.Length; ++i)
                 {
                     ref var aoe = ref aoes[i];
                     if (aoe.Origin.AlmostEqual(pSlot.dropofflocation, 1f))

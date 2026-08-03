@@ -39,9 +39,19 @@ public enum AID : uint
     PoisonRainVisual = 0xB87F, // boss->self, 4.7s cast, 毒雨, raidwide visual
     PoisonRain = 0xB880, // helper, no cast, 毒雨, raidwide damage
 
-    SpitVenom = 0xB86E, // clone (0x4BCC), no cast, 分泌毒液, low-priority spit visual
+    SpitVenom = 0xB86E, // clone (0x4BCC), no cast, persistent outer venom boundary
     SecreteVenomVisualA = 0xB86F, // boss->self, no cast, 分泌毒液 visual
     SecreteVenomVisualB = 0xC2DD // boss->self, no cast, 分泌毒液 visual
+}
+
+// B86E has no cast packet, but repeats for the entire encounter and kills targets in the outer
+// band. ARR hit positions start just outside 24.5y and the Action sheet gives a 30y outer radius.
+sealed class VenomBoundary(BossModule module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeDonut Shape = new(24.5f, 30f);
+    private readonly AOEInstance[] _aoe = [new(Shape, module.Arena.Center)];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
 }
 
 // Cast rotations are replay-verified: each helper cast already carries the packet rotation pointing
@@ -51,6 +61,8 @@ sealed class ManyMouthsAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
     // 52y long / 10y wide line, centered on the caster (extends front and back).
     private static readonly AOEShapeRect CentralLine = new(26f, 5f, 26f);
     // Side whip is a pair of opposing 135-degree cones; the safe gap is the narrow front/back sliver.
+    // Replay-verified: B875 hits span +18..+161 deg from facing (C241 the mirrored -138..-16),
+    // i.e. a 135-degree cone - the official sheet's fan180 Omen is not representative here.
     private static readonly AOEShapeCone Whip = new(26f, 67.5f.Degrees());
     // Poison mist fills 3 of the 4 quadrants with 90-degree cones (45-degree half-angle).
     private static readonly AOEShapeCone Mist = new(30f, 45f.Degrees());
@@ -94,6 +106,7 @@ sealed class VenomSpread(BossModule module) : Components.GenericAOEs(module)
     private const int PulseCount = 8;
     private const float InitialRadius = 5f;
     private const float RadiusStep = 2.5f;
+    private const float FinalRadius = InitialRadius + RadiusStep * (PulseCount - 1);
     private const double FirstDelayAfterVenom = 2.45d;
     private const double PulseInterval = 1.07d;
     private readonly List<Spread> _spreads = [with(4)];
@@ -113,6 +126,19 @@ sealed class VenomSpread(BossModule module) : Components.GenericAOEs(module)
     }
 
     public override void Update() => Prune();
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        foreach (var spread in _spreads)
+        {
+            if (spread.Pulse >= PulseCount - 1)
+                continue;
+
+            var finalActivation = spread.Activation.AddSeconds((PulseCount - 1 - spread.Pulse) * PulseInterval);
+            hints.AddForbiddenZone(new SDCircle(spread.Origin, FinalRadius), finalActivation);
+        }
+    }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
@@ -163,6 +189,7 @@ sealed class ManyMouthsToFeedStates : StateMachineBuilder
     public ManyMouthsToFeedStates(BossModule module) : base(module)
     {
         TrivialPhase()
+            .ActivateOnEnter<VenomBoundary>()
             .ActivateOnEnter<ManyMouthsAOEs>()
             .ActivateOnEnter<VenomPuddles>()
             .ActivateOnEnter<VenomSpread>()
@@ -182,7 +209,7 @@ sealed class ManyMouthsToFeedStates : StateMachineBuilder
     GroupID = 1093u,
     NameID = 49u,
     SortOrder = 14)]
-public sealed class ManyMouthsToFeed(WorldState ws, Actor primary) : BossModule(ws, primary, new(-870f, -560f), new ArenaBoundsCircle(20f))
+public sealed class ManyMouthsToFeed(WorldState ws, Actor primary) : BossModule(ws, primary, new(-870f, -560f), new ArenaBoundsCircle(30f))
 {
     protected override void DrawEnemies(int pcSlot, Actor pc)
     {

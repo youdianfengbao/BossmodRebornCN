@@ -42,7 +42,7 @@ public enum AID : uint
     ShapeshiftingSupercellResolve = 0xBCE6,
     ShapeshiftingSupercellConeShort = 0xBCE7, // helper->self, 1.5s cast, range 60 90-degree cone
     ShapeshiftingSupercellCircle = 0xBCE8, // helper->self, 6.0s cast, range 8 circle
-    ShapeshiftingSupercellDonutInner = 0xBCE9, // helper->self, 6.0s cast, range 10-16 donut
+    ShapeshiftingSupercellDonutInner = 0xBCE9, // helper->self, 6.0s cast, range 10-20 donut
     ShapeshiftingSupercellDonutOuter = 0xBCEA, // helper->self, 6.0s cast, range 16-30 donut
     ShapeshiftingSupercellExtraCircle = 0xC64F, // helper->self, 6.0s cast, range 8 circle
     MadeMagicVisual = 0xBCEB, // boss->self, 4.0s cast, visual
@@ -63,7 +63,8 @@ public enum SID : uint
 // The real arena is a 25y circle (player p99.9 radius 24.8, boundary hit at 24.6, charge targets at
 // 25), so mark the persistent electric fence with a thin ring at the edge instead of a 20-30 donut.
 // The outer radius extends to 30 (players have been killed as far out as 29y), so the warning also
-// covers the out-of-bounds zone the fence guards.
+// covers the out-of-bounds zone the fence guards. The official Action sheet (0xBCEF, eff=10 donut,
+// xAxis=30) agrees: outer kill ring at 30y, walkable circle 25y.
 sealed class LethalBoundary(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeDonut Shape = new(24.5f, 30f);
@@ -84,7 +85,8 @@ sealed class MorphingMageAOEs(BossModule module) : ReplayValidatedCastAOEs(modul
     private static readonly AOEShapeCone SupercellCone = new(60f, 45f.Degrees());
     private static readonly AOEShapeCircle SupercellCircle = new(8f);
     // Inner radius 8f, not 10f: the 8-10y band is lethal too (replay-indirect; user-measured
-    // 2026-08-02 - the old inner radius 10 marked it safe).
+    // 2026-08-02 - the old inner radius 10 marked it safe). Outer edge 16f stays so inner
+    // (8-16) and outer (16-30) donuts tile the ring without overlap.
     private static readonly AOEShapeDonut SupercellInner = new(8f, 16f);
     private static readonly AOEShapeDonut SupercellOuter = new(16f, 30f);
     private static readonly AOEShapeCross CycloneCross = new(60f, 8f);
@@ -141,6 +143,7 @@ sealed class MadeMagic(BossModule module) : Components.GenericAOEs(module)
     private const float MaxRadius = 17.5f; // extra 7 * 2.5
     private const double SequenceMaxDuration = 180d; // status 1909 lasts ~163s; a shorter window would clear the ring early
     private DateTime? _expireAt; // hard expiry for the pulse activation so rings cannot outlive the mechanic
+    private static readonly AOEShapeCircle FinalSweep = new(MaxRadius); // upstream: pre-built AI hint shape
     private readonly Dictionary<ulong, AOEInstance> _pending = [];
     private readonly Dictionary<ulong, int> _extra = [];
     private readonly List<AOEInstance> _displayed = new(4);
@@ -153,12 +156,15 @@ sealed class MadeMagic(BossModule module) : Components.GenericAOEs(module)
         return CollectionsMarshal.AsSpan(_displayed);
     }
 
-    // Drive AI avoidance off fixed filled circles: forbid everything out to the 17.5y maximum
-    // around every active helper, so the four edge pockets stay open.
+    // Reserve the complete sweep as soon as the first growth status arrives (upstream version).
+    // Expanding this hint pulse-by-pulse makes automation walk a few yalms after every hit; the
+    // final 17.5y footprint sends it to one of the four edge pockets in a single route.
+    // ActiveAOEs still draws only the current real radius, so the visual timing remains faithful
+    // to the mechanic.
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        foreach (var (_, aoe) in _pending)
-            hints.AddForbiddenZone(new AOEShapeCircle(MaxRadius), aoe.Origin);
+        foreach (var aoe in _pending.Values)
+            hints.AddForbiddenZone(FinalSweep, aoe.Origin);
     }
 
     public override void Update()
@@ -549,4 +555,9 @@ sealed class AcceptNoImitatorsStates : StateMachineBuilder
     SortOrder = 9)]
 // Replay-verified 25y circular arena (players reach r24.8, the charge ends at r25 and the fence
 // kills at 24.6); the old 20y circle clipped the charge and misplaced the boundary drawing.
-public sealed class AcceptNoImitators(WorldState ws, Actor primary) : BossModule(ws, primary, new(500f, -310f), new ArenaBoundsCircle(25f));
+public sealed class AcceptNoImitators(WorldState ws, Actor primary) : BossModule(ws, primary, new(500f, -310f), new ArenaBoundsCircle(25f))
+{
+    // NOTE: the upstream HellwardBound geometric-dash component (and its CalculateModuleAIHints
+    // GoalProximity) was not kept - the CN build uses the local HellwardBoundDashes arrow-chain
+    // component (0x1EC09B), which already forbids every dash lane via AddAIHints.
+}

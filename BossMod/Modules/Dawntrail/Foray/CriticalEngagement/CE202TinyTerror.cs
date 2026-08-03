@@ -105,20 +105,39 @@ sealed class DiminutiveDualcast(BossModule module) : ReplayValidatedCastAOEs(mod
     private static readonly AOEShapeCone Blizzard = new(40.0f, 30.0f.Degrees());
     private static readonly AOEShapeCircle Fire = new(14.0f);
 
-    protected override int MaxDisplayed => 4;
-    protected override double RiskyActivationWindow => 0.2d;
+    // A complete dualcast wave contains two groups of three cones plus one fire circle.
+    // All seven overlap before the first group resolves, so limiting the queue to four drops
+    // the second cone group entirely.
+    protected override int MaxDisplayed => 7;
+    // The sequence resolves as three cones, then the fire circle, then three more cones at roughly
+    // two-second intervals. Display all seven, but only mark the current cones plus the fire risky;
+    // otherwise both cone groups combine into a false whole-arena danger zone.
+    protected override double RiskyActivationWindow => 2.5d;
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch {
         (uint)AID.TinyBlizzardIII => new(Blizzard),
         (uint)AID.TinyFireIII => new(Fire),
         _ => null
     };
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        foreach (ref readonly var aoe in ActiveAOEs(slot, actor)) {
+            if (!aoe.Risky) {
+                continue;
+            }
+
+            // BCBE is a 14y circle centered on the boss. Treat it as forbidden from cast start;
+            // otherwise pathfinding can enter it for uptime and schedule the escape too late.
+            var activation = ReferenceEquals(aoe.Shape, Fire) ? WorldState.CurrentTime : aoe.Activation;
+            hints.AddForbiddenZone(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation), activation);
+        }
+    }
 }
 
 sealed class TinyMeteor(BossModule module) : ReplayValidatedCastAOEs(module) {
     private static readonly AOEShapeCircle Shape = new(6.0f);
 
-    protected override double RiskyActivationWindow => 0.2d;
+    protected override double RiskyActivationWindow => 0.8d;
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID == (uint)AID.TinyMeteor ? new(Shape, true) : null;
 }
@@ -189,9 +208,14 @@ sealed class Comet(BossModule module) : BossComponent(module) {
             return;
         }
 
+        // The comet's nominal cast reads ~60s but it detonates far sooner once tethered (replay:
+        // cast start +20s). The blast is a 60y circle covering the whole r20 arena, so the only
+        // counter is killing the tethered comet; outline the blast radius around the kill target
+        // so players see how urgent it is to focus it down.
         foreach (var comet in comets.Values) {
             if (comet.Tethers == maxTethers) {
                 Arena.ZoneCircleOutline(comet.Actor.Position, 2.0f, Colors.Safe, 2.0f);
+                Arena.ZoneCircleOutline(comet.Actor.Position, 60.0f, Colors.Danger, 1.0f);
             }
         }
     }
@@ -199,6 +223,20 @@ sealed class Comet(BossModule module) : BossComponent(module) {
     public override void AddHints(int slot, Actor actor, TextHints hints) {
         if (MaxTetherCount() > 0) {
             hints.Add("Attack a comet with a green circle around it!");
+        }
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        var maxTethers = MaxTetherCount();
+        if (maxTethers <= 0) {
+            return;
+        }
+
+        foreach (var target in hints.PotentialTargets) {
+            if (target.Actor.OID == (uint)OID.ArcaneSphereSmall
+                && comets.GetValueOrDefault(target.Actor.InstanceID)?.Tethers == maxTethers) {
+                target.Priority = 2;
+            }
         }
     }
 
@@ -810,7 +848,9 @@ sealed class FlareCombo(BossModule module) : Components.GenericAOEs(module) {
 
         var upcoming = timeline.Upcoming(2);
         if (upcoming.Count != 0) {
-            var imminentDeadline = upcoming[0].Activation.AddSeconds(0.2d);
+            // Flare resolves as a 18y circle; automation needs the full remaining cast to move out
+            // (replay: AI was clipped at 17.8y in the 18y radius). Mark risky well before resolve.
+            var imminentDeadline = upcoming[0].Activation.AddSeconds(1.0d);
             foreach (var entry in upcoming) {
                 if (entry.Type == OrbPairTimeline.Kind.Flare) {
                     var imminent = entry.Activation <= imminentDeadline;

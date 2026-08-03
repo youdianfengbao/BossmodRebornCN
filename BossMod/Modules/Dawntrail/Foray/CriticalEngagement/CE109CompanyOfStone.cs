@@ -75,7 +75,7 @@ sealed class KnuckleCrusher : Components.SimpleAOEs
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         base.AddAIHints(slot, actor, assignment, hints);
-        if (Casters.Count != 0 && NumCasts < 2)
+        if (midpoint != default && Casters.Count != 0 && NumCasts < 2)
         {
             hints.AddForbiddenZone(new SDInvertedCircle(midpoint, 3f), Casters[^1].Activation); // stay in dodge spot
         }

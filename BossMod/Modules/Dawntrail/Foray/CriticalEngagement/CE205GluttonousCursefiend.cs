@@ -61,9 +61,8 @@ sealed class MiasmaBoundary(BossModule module) : Components.GenericAOEs(module)
 // the matching cast resolves; ActionEffect packet loss must not make the pre-cast telegraph vanish.
 sealed class AlgolAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 {
-    // The tomato-miasma helper sits at the strip's center: every recorded cast targets a point
-    // exactly 25y forward, and victims are hit just behind the helper too, so the strip is a
-    // symmetric 50y x 6y rect. A front-only rect previously left the near half undrawn.
+    // Action effects hit targets up to 25y on both sides of the helper, so the helper is the center
+    // of the 50x6 strip rather than its rear edge.
     private static readonly AOEShapeRect Tomato = new(25f, 3f, 25f);
     private static readonly AOEShapeCone Onion = new(60f, 15f.Degrees());
     private static readonly AOEShapeRect Cannon = new(40f, 25f);

@@ -161,11 +161,10 @@ sealed class HydraAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
     };
 }
 
-// Multiple Breaths has two linked six-hit sequences. The fast B86C casts reveal the order during
-// the long visual; after the visual resolves, C5F1/C5F2/C5F3 repeat that exact order. Treating the
-// 0.5s follow-up casts as unrelated AOEs gives navigation too little time to move. Record the first
-// sequence and publish the repeated sequence in advance, with the current and next cones risky so
-// AI can choose a route through the rotating pattern.
+// Multiple Breaths uses the fast B86C casts only to reveal the order during the long visual; they
+// do not damage players. After the visual resolves, C5F1/C5F2/C5F3 execute that order. Record the
+// demonstration without exposing it as an AOE, then publish the six real hits in advance, with the
+// current and next cones risky so AI can choose a route through the rotating pattern.
 sealed class MultipleBreathsSequence(BossModule module) : Components.GenericAOEs(module)
 {
     private sealed class BreathStep(uint actionID, Angle rotation, DateTime activation, ulong actorID)
@@ -208,7 +207,10 @@ sealed class MultipleBreathsSequence(BossModule module) : Components.GenericAOEs
     {
         if (spell.Action.ID == (uint)AID.MultipleBreathsVisual && !spell.EventHappened)
         {
-            _recorded.Clear();
+            // The first helper cast can arrive in the same frame just before the boss visual.
+            // Preserve that direction when it already opened this recording window.
+            if (!_recording)
+                _recorded.Clear();
             _steps.Clear();
             _recording = true;
             return;
@@ -216,11 +218,17 @@ sealed class MultipleBreathsSequence(BossModule module) : Components.GenericAOEs
 
         if (spell.Action.ID == (uint)AID.MultipleBreaths1 && !spell.EventHappened)
         {
-            var activation = Module.CastFinishAt(spell);
-            if (_recording && _recorded.Count < 6)
+            // The module can activate after the long visual cast has already started. In that
+            // case its first observable packet is one of these demonstration casts, so begin a
+            // fresh recording here instead of discarding the whole first sequence.
+            if (!_recording)
+            {
+                _recorded.Clear();
+                _steps.Clear();
+                _recording = true;
+            }
+            if (_recorded.Count < 6)
                 _recorded.Add(spell.Rotation);
-            _steps.Clear();
-            _steps.Add(new((uint)AID.MultipleBreaths1, spell.Rotation, activation, caster.InstanceID));
             return;
         }
 
@@ -259,8 +267,8 @@ sealed class MultipleBreathsSequence(BossModule module) : Components.GenericAOEs
             return;
         }
 
-        if (spell.Action.ID is not ((uint)AID.MultipleBreaths1) and not ((uint)AID.MultipleBreaths2)
-            and not ((uint)AID.MultipleBreaths3) and not ((uint)AID.MultipleBreaths4))
+        if (spell.Action.ID is not ((uint)AID.MultipleBreaths2) and not ((uint)AID.MultipleBreaths3)
+            and not ((uint)AID.MultipleBreaths4))
             return;
 
         var index = _steps.FindIndex(step => step.ActionID == spell.Action.ID && step.Activation <= WorldState.FutureTime(0.75d));

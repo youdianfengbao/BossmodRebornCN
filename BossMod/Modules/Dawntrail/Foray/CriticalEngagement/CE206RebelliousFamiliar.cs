@@ -23,7 +23,7 @@ public enum AID : uint
     RubyReflectionLong1 = 0xBC9E, // helper, 40y long, 40y wide rect
     RubyReflectionLong2 = 0xBC9F,
     CircularKnockbackTelegraph = 0xBCA0, // helper, 60y circle; resolves as 30y away knockback
-    KnockAsideTelegraph = 0xBCA1, // helper, 40y long, 60y wide rect; resolves as 15y left knockback
+    KnockAsideTelegraph = 0xBCA1, // helper, 40y long, 60y wide rect; resolves as 15y source-left/right knockback per target side
     RavenousGods = 0xBCA3,
     RavenousGodsSecond = 0xBCA4,
     ClawThenTail = 0xBCA6, // 45y 180-degree cone
@@ -66,10 +66,17 @@ sealed class TopazRay(BossModule module) : ReplayValidatedCastAOEs(module)
 
 sealed class LethalBoundary(BossModule module) : Components.GenericAOEs(module)
 {
-    private static readonly AOEShapeRect Shape = new(24f, 0.75f, 24f);
+    private static readonly AOEShapeRect Shape = new(24f, 0.5f, 24f);
+    private static readonly AOEShapeRect AIShape = new(24f, 1f, 24f);
     private readonly AOEInstance[] _aoes = Build(module.Arena.Center);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoes;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var aoe in _aoes)
+            hints.AddForbiddenZone(AIShape.Distance(aoe.Origin, aoe.Rotation));
+    }
 
     private static AOEInstance[] Build(WPos center)
     {
@@ -78,16 +85,15 @@ sealed class LethalBoundary(BossModule module) : Components.GenericAOEs(module)
         {
             var normal = (i * 90f).Degrees().ToDirection();
             var rotation = Angle.FromDirection(normal.OrthoL());
-            var origin = center + 23.25f * normal;
-            result[i] = new(Shape, origin, rotation, color: Colors.Danger, shapeDistance: Shape.Distance(origin, rotation));
+            var origin = center + 24f * normal;
+            result[i] = new(Shape, origin, rotation, color: Colors.Danger, risky: false, shapeDistance: Shape.Distance(origin, rotation));
         }
         return result;
     }
 }
 
-// C4F2 reveals the reflection pattern four seconds before it resolves. The live helpers are
-// already parked on the square floor grid: two diagonal helpers own the 20x20 pattern, while
-// three helpers on the five-yalm columns own the 40x40 pattern.
+// Reflection helpers use either axis of the square grid: two diagonal helpers own the 20x20
+// pattern, while three helpers on a five-yalm row or column own the 40x40 pattern.
 sealed class RubyReflection(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeRect Short = new(20f, 10f);
@@ -109,7 +115,9 @@ sealed class RubyReflection(BossModule module) : Components.GenericAOEs(module)
             var diagonal = MathF.Abs(MathF.Abs(offset.X) - 10f) < 0.75f && MathF.Abs(MathF.Abs(offset.Z) - 10f) < 0.75f;
             var column = MathF.Abs(MathF.Abs(offset.X) - 5f) < 0.75f
                 && (MathF.Abs(offset.Z) < 0.75f || MathF.Abs(MathF.Abs(offset.Z) - 20f) < 0.75f);
-            var shape = diagonal ? Short : column ? Long : null;
+            var row = MathF.Abs(MathF.Abs(offset.Z) - 5f) < 0.75f
+                && (MathF.Abs(offset.X) < 0.75f || MathF.Abs(MathF.Abs(offset.X) - 20f) < 0.75f);
+            var shape = diagonal ? Short : column || row ? Long : null;
             if (shape != null)
                 _displayed.Add(new(shape, helper.Position, helper.Rotation, _activation, Colors.Danger, true,
                     helper.InstanceID, shape.Distance(helper.Position, helper.Rotation)));
@@ -139,19 +147,52 @@ sealed class RubyReflection(BossModule module) : Components.GenericAOEs(module)
     }
 }
 
-// BCA0 telegraphs a 60y radial knockback that resolves as C162 when Ravenous Gods completes,
-// ~6s after the short telegraph ends. Replay displacement shows every player is pulled TOWARD the
-// circle helper (not pushed away): wave1 helper at (238,332) carried players 15y north, wave2
-// helper at (218,352) carried them 15y west. Keep the warning visible for the full setup so
-// automation can solve both knockbacks as one route instead of reacting during the final two
-// seconds.
+static class KnockbackGeometry
+{
+    // C163 row 90 is SourceRight and row 91 is SourceLeft. The server chooses the row from
+    // the target's side of the helper's facing axis, so this must be evaluated at each candidate.
+    public static WDir AsideDirection(WPos point, WPos origin, WDir facing)
+    {
+        var right = facing.OrthoR();
+        return (point - origin).Dot(right) >= 0f ? right : -right;
+    }
+}
+
+sealed class SDAsideKnockbackInAABBSquare(WPos center, WPos origin, WDir facing, float distance, float halfWidth) : ShapeDistance
+{
+    public override bool Contains(in WPos p)
+        => !(p + distance * KnockbackGeometry.AsideDirection(p, origin, facing)).InSquare(center, halfWidth);
+
+    public override float Distance(in WPos p) => Contains(p) ? 0f : 1f;
+
+    public override bool RowIntersectsShape(WPos rowStart, WDir dx, float width, float cushion = default) => true;
+}
+
+sealed class SDAsideThenRadialKnockbackInAABBSquare(WPos center, WPos asideOrigin, WDir asideFacing, float asideDistance, WPos circleOrigin, float circleDistance, float halfWidth) : ShapeDistance
+{
+    public override bool Contains(in WPos p)
+    {
+        var p1 = p + asideDistance * KnockbackGeometry.AsideDirection(p, asideOrigin, asideFacing);
+        if (!p1.InSquare(center, halfWidth))
+            return true;
+
+        var radial = (p1 - circleOrigin).Normalized();
+        var p2 = radial == default ? p1 : p1 + circleDistance * radial;
+        return !p2.InSquare(center, halfWidth);
+    }
+
+    public override float Distance(in WPos p) => Contains(p) ? 0f : 1f;
+
+    public override bool RowIntersectsShape(WPos rowStart, WDir dx, float width, float cushion = default) => true;
+}
+
+// BCA0 resolves as a 30y radial knockback away from its helper about six seconds after the
+// telegraph. Keep it visible for the full setup so both knockbacks are solved as one route.
 sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(module)
 {
     private static readonly AOEShapeCircle Shape = new(60f);
-    private const float Distance = 15f;
-    // The electric fence kills at ~23.6y from center (replay death point), so reserve just half a
-    // yalm inside the 24y square for hitbox/interpolation tolerance.
-    private const float SafeHalfWidth = 23.5f;
+    private const float Distance = 30f;
+    private const float SafeHalfWidth = 23f;
     private const double HitDelay = 6.0d;
     private readonly List<Knockback> _casters = [];
     private readonly List<Knockback> _displayed = [with(4)];
@@ -169,24 +210,13 @@ sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        // The lateral (aside) shove resolves ~3.4s before this radial push, so the player is already
-        // displaced by it when the circle resolves. If we evaluate the safe square from the current
-        // position we get the wrong side of the origin (the aside can carry the player past the
-        // circle center, flipping the radial escape direction into the fence). While the aside is
-        // still pending, offset both the square and the push origin by that displacement so the
-        // forbidden zone describes the post-aside push. Show it for the whole cast (no 2s gate) so
-        // automation can pre-position for the combined knockback rather than react after the shove.
         var aside = Module.FindComponent<KnockAside>();
         foreach (var kb in _casters)
         {
-            var center = Arena.Center;
-            var origin = kb.Origin;
-            if (aside != null && aside.TryGetPendingAsidePush(kb.Activation, out var a))
-            {
-                center -= a;
-                origin -= a;
-            }
-            hints.AddForbiddenZone(new SDKnockbackInAABBSquareTowardsOrigin(center, origin, kb.Distance, SafeHalfWidth), kb.Activation);
+            // Before C163, solve both hits from the candidate start: the first displacement can
+            // differ by side even for two players in the same packet. After C163, only C162 remains.
+            if (aside == null || !aside.AddCombinedAIHint(kb, hints))
+                hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Arena.Center, kb.Origin, kb.Distance, SafeHalfWidth), kb.Activation);
         }
     }
 
@@ -195,7 +225,7 @@ sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(
         if (spell.Action.ID == (uint)AID.CircularKnockbackTelegraph)
         {
             _casters.RemoveAll(k => k.ActorID == caster.InstanceID);
-            _casters.Add(new(spell.LocXZ, Distance, Module.CastFinishAt(spell).AddSeconds(HitDelay), Shape, spell.Rotation, Kind.TowardsOrigin, actorID: caster.InstanceID));
+            _casters.Add(new(spell.LocXZ, Distance, Module.CastFinishAt(spell).AddSeconds(HitDelay), Shape, spell.Rotation, Kind.AwayFromOrigin, actorID: caster.InstanceID));
         }
     }
 
@@ -215,46 +245,39 @@ sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(
     }
 }
 
-// BCA1 telegraphs the first knockback; the real hit (C163) lands ~5.1s after the short telegraph
-// ends. Replay displacement shows it also pulls every player TOWARD the aside helper: wave1 helper
-// at (258,352) carried players ~10-15y east, wave2 helper at (238,332) carried them north. Keep the
-// arrow visible for the full setup and add a square-wall forbidden zone so automation starts from a
-// position that stays inside after the pull.
+// BCA1 resolves first as a 15y lateral shove. C163 chooses SourceRight or SourceLeft separately
+// for every target from that target's side of the helper's facing axis.
 sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
 {
     private static readonly AOEShapeRect Shape = new(40f, 30f);
     private const float Distance = 15f;
-    private const float SafeHalfWidth = 23.5f;
+    private const float SafeHalfWidth = 23f;
     private const double HitDelay = 5.1d;
 
-    private sealed class AsideSource(WPos asidePos, WPos circlePos, DateTime activation, ulong actorID)
+    private sealed class AsideSource(WPos asidePos, WPos circlePos, Angle facing, DateTime activation, ulong actorID)
     {
         public readonly WPos AsidePos = asidePos;
         public readonly WPos CirclePos = circlePos;
+        public readonly Angle Facing = facing;
         public readonly DateTime Activation = activation;
         public readonly ulong ActorID = actorID;
 
+        public Kind KindFor(WPos point) => (point - AsidePos).Dot(Facing.ToDirection().OrthoR()) >= 0f ? Kind.DirRight : Kind.DirLeft;
     }
 
     private readonly List<AsideSource> _sources = [];
-    private readonly List<(WPos AsidePos, DateTime Activation, ulong ActorID)> _pendingAside = [];
+    private readonly List<(WPos AsidePos, Angle Facing, DateTime Activation, ulong ActorID)> _pendingAside = [];
     private readonly List<Knockback> _displayed = [with(4)];
 
-    // Exposes the lateral push displacement (15y * direction) that will resolve before the given
-    // circular-knockback activation and has not yet been applied, so CircularKnockback can offset
-    // its safe square by it. Returns false when no such aside is still pending.
-    public bool TryGetPendingAsidePush(DateTime circleActivation, out WDir push)
+    public bool AddCombinedAIHint(Knockback circle, AIHints hints)
     {
-        var now = WorldState.CurrentTime;
         foreach (var source in _sources)
-            if (source.Activation < circleActivation && now < source.Activation)
+            if (source.Activation < circle.Activation && source.CirclePos.AlmostEqual(circle.Origin, 0.5f))
             {
-                // The pull displacement is radial toward the aside helper, so the same offset
-                // applies to every player during this wave.
-                push = Distance * (source.AsidePos - Arena.Center).Normalized();
+                hints.AddForbiddenZone(new SDAsideThenRadialKnockbackInAABBSquare(Arena.Center, source.AsidePos,
+                    source.Facing.ToDirection(), Distance, circle.Origin, circle.Distance, SafeHalfWidth), source.Activation);
                 return true;
             }
-        push = default;
         return false;
     }
 
@@ -263,9 +286,7 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
         PruneExpired();
         _displayed.Clear();
         foreach (var source in _sources)
-        {
-            _displayed.Add(new(source.AsidePos, Distance, source.Activation, Shape, default, Kind.TowardsOrigin, actorID: source.ActorID));
-        }
+            _displayed.Add(new(source.AsidePos, Distance, source.Activation, Shape, source.Facing, source.KindFor(actor.Position), actorID: source.ActorID));
         return CollectionsMarshal.AsSpan(_displayed);
     }
 
@@ -274,9 +295,7 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         foreach (var source in _sources)
-        {
-            hints.AddForbiddenZone(new SDKnockbackInAABBSquareTowardsOrigin(Arena.Center, source.AsidePos, Distance, SafeHalfWidth), source.Activation);
-        }
+            hints.AddForbiddenZone(new SDAsideKnockbackInAABBSquare(Arena.Center, source.AsidePos, source.Facing.ToDirection(), Distance, SafeHalfWidth), source.Activation);
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
@@ -285,16 +304,16 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
         {
             case (uint)AID.KnockAsideTelegraph:
                 _pendingAside.RemoveAll(p => p.ActorID == caster.InstanceID);
-                _pendingAside.Add((caster.Position, Module.CastFinishAt(spell).AddSeconds(HitDelay), caster.InstanceID));
+                _pendingAside.Add((caster.Position, spell.Rotation, Module.CastFinishAt(spell).AddSeconds(HitDelay), caster.InstanceID));
                 break;
             case (uint)AID.CircularKnockbackTelegraph:
-                // The circle helper arrives a couple of seconds after the aside telegraph; pair the
-                // latest pending aside with it to resolve the lateral push direction.
+                // The circle helper arrives a couple of seconds after the aside telegraph; pair it
+                // with the pending aside so AI can evaluate both landings from one candidate point.
                 for (var i = _pendingAside.Count - 1; i >= 0; --i)
                 {
                     var p = _pendingAside[i];
                     _sources.RemoveAll(s => s.ActorID == p.ActorID);
-                    _sources.Add(new(p.AsidePos, spell.LocXZ, p.Activation, p.ActorID));
+                    _sources.Add(new(p.AsidePos, spell.LocXZ, p.Facing, p.Activation, p.ActorID));
                     _pendingAside.RemoveAt(i);
                 }
                 break;

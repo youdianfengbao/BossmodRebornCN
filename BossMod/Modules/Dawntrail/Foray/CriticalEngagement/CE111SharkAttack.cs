@@ -99,7 +99,7 @@ abstract class OpenWater(BossModule module, int maxCasts, float timeToMove, Angl
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         var count = _aoes.Count;
-        if (count == 0)
+        if (count == 0 || NumCasts >= count)
             return [];
         var max = count > 5 ? 5 : count;
         var aoes = CollectionsMarshal.AsSpan(_aoes);
@@ -112,7 +112,12 @@ abstract class OpenWater(BossModule module, int maxCasts, float timeToMove, Angl
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.OpenWaterVisualFirst)
+        if (spell.Action.ID == (uint)AID.OpenWaterVisual)
+        {
+            _aoes.Clear();
+            NumCasts = 0;
+        }
+        else if (spell.Action.ID == (uint)AID.OpenWaterVisualFirst)
         {
             var dir = caster.Position - CE111SharkAttack.ArenaCenter;
             var inside = dir.LengthSq() < 225f;

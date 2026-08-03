@@ -38,7 +38,7 @@ public enum AID : uint
     GarroteCancel = 0xB7E2, // HairBinding->self, no cast, cancellation/death event
     HairShearsVisual = 0xB7E3, // boss->self, 5.0s cast, visual
     HairShearsCircle = 0xB7E4, // helper->self, 5.0s cast, 10y circle
-    HairShearsLine = 0xB7E5, // helper->self, 5.0s cast, 60y long 4y wide rect
+    HairShearsLine = 0xB7E5, // helper->self, 5.0s cast, 60y long 4y wide cross
     MaliciousWeaveShort = 0xB7E6, // HairBinding->self, 1.0s cast, 6y circle and draw-in
     AuraBurstVisual = 0xB7E7, // boss->self, 5.0s cast, raidwide visual
     AuraBurst = 0xB7E8, // three helpers, no cast, raidwide damage
@@ -57,7 +57,10 @@ sealed class CalofisteriAOEs(BossModule module) : ReplayValidatedCastAOEs(module
 {
     private static readonly AOEShapeCircle SixYalms = new(6f);
     private static readonly AOEShapeCircle HairShearsCircle = new(10f);
-    private static readonly AOEShapeRect HairShearsLine = new(60f, 2f, 60f, 90f.Degrees());
+    // Official sheet marks B7E5 as a 60y cross; replays confirm both arms: each helper fires the
+    // same AID at two rotations 45 deg apart, and hits land along the cast direction (|perp|<=2y)
+    // as well as perpendicular to it (|proj|<=2y), so a 4y-wide cross matches the kill points.
+    private static readonly AOEShapeCross HairShearsLine = new(60f, 2f);
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
@@ -106,6 +109,57 @@ sealed class DualCuts(BossModule module) : ReplayValidatedCastAOEs(module)
     };
 }
 
+// A binding only proceeds to the lethal Garrote if its weave actually hit at least one target.
+// The weave event arrives about 3.1s before Garrote starts, so use it as the primary target-switch
+// signal and keep the Garrote cast-start as a packet-loss/late-join fallback.
+sealed class GarroteTargets(BossModule module) : BossComponent(module)
+{
+    private readonly HashSet<ulong> _urgent = [];
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var enemy in hints.PotentialTargets)
+        {
+            if (enemy.Actor.OID == (uint)OID.Hair)
+                enemy.ForcePriority(AIHints.Enemy.PriorityPointless);
+            else if (enemy.Actor.OID == (uint)OID.HairBinding)
+                enemy.ForcePriority(_urgent.Contains(enemy.Actor.InstanceID) ? 3 : AIHints.Enemy.PriorityPointless);
+        }
+    }
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.Garrote && !spell.EventHappened)
+            _urgent.Add(caster.InstanceID);
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.Garrote)
+            _urgent.Remove(caster.InstanceID);
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        switch (spell.Action.ID)
+        {
+            case (uint)AID.MaliciousWeaveLong:
+            case (uint)AID.MaliciousWeaveShort:
+                if (spell.Targets.Count != 0)
+                    _urgent.Add(caster.InstanceID);
+                else
+                    _urgent.Remove(caster.InstanceID);
+                break;
+            case (uint)AID.GarroteCancel:
+                _urgent.Remove(caster.InstanceID);
+                break;
+        }
+    }
+
+    public override void OnActorDeath(Actor actor) => _urgent.Remove(actor.InstanceID);
+    public override void OnActorDestroyed(Actor actor) => _urgent.Remove(actor.InstanceID);
+}
+
 // The BF9C/BF9D cast rotation is a fixed packet value and does not point along the charge. Build
 // each rectangle from the helper's live position to spell.LocXZ instead. The small resolved-cast
 // tombstone prevents an accelerated replay's stale cast-start packet from resurrecting a charge.
@@ -125,6 +179,8 @@ sealed class DashingCuts(BossModule module) : Components.GenericAOEs(module)
     private readonly List<AOEInstance> _displayed = [with(4)];
     private readonly List<ResolvedCharge> _resolved = [with(4)];
     private readonly Dictionary<EventKey, DateTime> _seenEvents = [];
+    private DateTime? _routeFirstActivation;
+    private int _routeMarkers;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
@@ -155,11 +211,25 @@ sealed class DashingCuts(BossModule module) : Components.GenericAOEs(module)
         var rotation = Angle.FromDirection(direction);
         var shape = new AOEShapeRect(length, 5f);
         var aoe = new AOEInstance(shape, caster.Position, rotation, activation, actorID: caster.InstanceID, shapeDistance: shape.Distance(caster.Position, rotation));
-        var duplicate = _pending.FindIndex(pending => pending.ActionID == spell.Action.ID
-            && pending.AOE.ActorID == caster.InstanceID
-            && Math.Abs((pending.AOE.Activation - activation).TotalSeconds) <= CastMatchTolerance);
-        if (duplicate >= 0)
-            _pending[duplicate] = new(spell.Action.ID, aoe);
+        if (spell.Action.ID == (uint)AID.DashingCutLong && (_routeFirstActivation == null || Math.Abs((_routeFirstActivation.Value - activation).TotalSeconds) > CastMatchTolerance))
+        {
+            _pending.Clear();
+            _routeFirstActivation = activation;
+            _routeMarkers = 0;
+        }
+
+        var match = spell.Action.ID == (uint)AID.DashingCutShort
+            ? _pending.FindIndex(pending => pending.ActionID == spell.Action.ID && pending.AOE.ActorID == 0
+                && pending.AOE.Origin.AlmostEqual(caster.Position, 0.2f)
+                && Math.Abs((pending.AOE.Rotation - rotation).Normalized().Rad) < 1f.Degrees().Rad
+                && Math.Abs((pending.AOE.Activation - activation).TotalSeconds) <= CastMatchTolerance)
+            : -1;
+        if (match < 0)
+            match = _pending.FindIndex(pending => pending.ActionID == spell.Action.ID
+                && pending.AOE.ActorID == caster.InstanceID
+                && Math.Abs((pending.AOE.Activation - activation).TotalSeconds) <= CastMatchTolerance);
+        if (match >= 0)
+            _pending[match] = new(spell.Action.ID, aoe);
         else
             _pending.Add(new(spell.Action.ID, aoe));
         _pending.Sort((left, right) => left.AOE.Activation.CompareTo(right.AOE.Activation));
@@ -175,10 +245,16 @@ sealed class DashingCuts(BossModule module) : Components.GenericAOEs(module)
         RemoveMatchingCast(spell.Action.ID, caster.InstanceID, activation);
         if (spell.EventHappened || activation <= now.AddSeconds(EventResolveTolerance))
             RememberResolved(spell.Action.ID, caster.InstanceID, activation, now);
+        ResetRouteIfFinished();
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
+        if (spell.Action.ID == (uint)AID.DashingCutMarker)
+        {
+            AddRouteMarker(caster, spell);
+            return;
+        }
         if (!IsWatched(spell.Action.ID))
             return;
 
@@ -190,12 +266,34 @@ sealed class DashingCuts(BossModule module) : Components.GenericAOEs(module)
         ++NumCasts;
         var activation = RemoveResolvedByEvent(spell.Action.ID, caster.InstanceID, now) ?? now;
         RememberResolved(spell.Action.ID, caster.InstanceID, activation, now);
+        ResetRouteIfFinished();
     }
 
     public override void OnActorDeath(Actor actor) => RemoveActor(actor.InstanceID);
     public override void OnActorDestroyed(Actor actor) => RemoveActor(actor.InstanceID);
 
     private static bool IsWatched(uint actionID) => actionID is (uint)AID.DashingCutLong or (uint)AID.DashingCutShort;
+
+    private void AddRouteMarker(Actor caster, ActorCastEvent spell)
+    {
+        var now = WorldState.CurrentTime;
+        PruneExpired();
+        if (_routeFirstActivation == null || _routeMarkers >= 2 || IsDuplicateEvent(spell.GlobalSequence, spell.Action.ID, caster.InstanceID, now))
+            return;
+
+        var direction = spell.TargetXZ - caster.Position;
+        var length = direction.Length();
+        if (length <= 0.1f)
+            return;
+
+        var rotation = Angle.FromDirection(direction);
+        var shape = new AOEShapeRect(length, 5f);
+        var activation = _routeFirstActivation.Value.AddSeconds(7d * (_routeMarkers + 1));
+        _pending.Add(new((uint)AID.DashingCutShort, new(shape, caster.Position, rotation, activation,
+            actorID: 0, shapeDistance: shape.Distance(caster.Position, rotation))));
+        ++_routeMarkers;
+        _pending.Sort((left, right) => left.AOE.Activation.CompareTo(right.AOE.Activation));
+    }
 
     private DateTime? RemoveResolvedByEvent(uint actionID, ulong actorID, DateTime now)
     {
@@ -273,6 +371,19 @@ sealed class DashingCuts(BossModule module) : Components.GenericAOEs(module)
         _resolved.RemoveAll(resolved => now > resolved.ExpiresAt);
         foreach (var key in _seenEvents.Where(entry => now > entry.Value).Select(entry => entry.Key).ToArray())
             _seenEvents.Remove(key);
+        if (_routeFirstActivation is { } first && now > first.AddSeconds(16d))
+        {
+            _routeFirstActivation = null;
+            _routeMarkers = 0;
+        }
+    }
+
+    private void ResetRouteIfFinished()
+    {
+        if (_pending.Count != 0)
+            return;
+        _routeFirstActivation = null;
+        _routeMarkers = 0;
     }
 
     private void RemoveActor(ulong actorID)
@@ -291,10 +402,10 @@ sealed class MaliciousWeavePulls(BossModule module) : Components.SimpleKnockback
 
 // Hair Shears first resolves B7E5, then B9EF pulls each player hit by that line to its source about
 // 1.08 seconds later. The pull uses separate helpers, so resolve it by origin+rotation rather than
-// helper instance id.
+// helper instance id. The affected shape is the same 4y-wide cross as the damaging AOE.
 sealed class HairShearsPulls(BossModule module) : Components.GenericKnockback(module)
 {
-    private static readonly AOEShapeRect Shape = new(60f, 2f, 60f, 90f.Degrees());
+    private static readonly AOEShapeCross Shape = new(60f, 2f);
     private readonly List<Knockback> _pulls = [with(8)];
     private readonly HashSet<uint> _seenGlobalSequences = [];
 
@@ -343,6 +454,7 @@ sealed class DoubledTroubleStates : StateMachineBuilder
     public DoubledTroubleStates(BossModule module) : base(module)
     {
         TrivialPhase()
+            .ActivateOnEnter<GarroteTargets>()
             .ActivateOnEnter<CalofisteriAOEs>()
             .ActivateOnEnter<DualCuts>()
             .ActivateOnEnter<DashingCuts>()

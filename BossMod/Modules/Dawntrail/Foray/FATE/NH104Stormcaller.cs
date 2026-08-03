@@ -53,7 +53,7 @@ sealed class FreefallSequence(BossModule module) : Components.GenericAOEs(module
         _aoes.Clear();
         _seenGlobalSequences.Clear();
         foreach (var offset in ResolveOffsets)
-            _aoes.Add(new(Shape, spell.LocXZ, activation: Module.CastFinishAt(spell, offset)));
+            _aoes.Add(new(Shape, spell.LocXZ, activation: Module.CastFinishAt(spell, offset), risky: false));
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)

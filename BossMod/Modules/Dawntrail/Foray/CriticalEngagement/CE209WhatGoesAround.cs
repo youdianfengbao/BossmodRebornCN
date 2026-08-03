@@ -80,6 +80,9 @@ sealed class WhatGoesAroundAOEs(BossModule module) : ReplayValidatedCastAOEs(mod
 // B84F is split across three helpers. The boss cast is the stable advance warning.
 sealed class DarkIV(BossModule module) : Components.RaidwideCast(module, (uint)AID.DarkIV);
 
+// 2026-08-03: the upstream ElectricBoundary class (ARR BFD0 deaths ~24.4y) was NOT restored -
+// CN in-game observation shows the instakill boundary is a 21y SQUARE (see the module below);
+// the 24.5y square + fence overlay only drew dead zone between the fence and the kill boundary.
 sealed class WhatGoesAroundStates : StateMachineBuilder
 {
     public WhatGoesAroundStates(BossModule module) : base(module)

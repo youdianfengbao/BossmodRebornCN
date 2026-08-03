@@ -147,7 +147,7 @@ sealed class ArcaneOrb(BossModule module) : Components.GenericAOEs(module)
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         var count = _aoes.Count;
-        if (count == 0)
+        if (count == 0 || NumCasts >= count)
         {
             return [];
         }
@@ -160,7 +160,12 @@ sealed class ArcaneOrb(BossModule module) : Components.GenericAOEs(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.ArcaneOrbTelegraph)
+        if (spell.Action.ID == (uint)AID.ArcaneDesign)
+        {
+            _aoes.Clear();
+            NumCasts = 0;
+        }
+        else if (spell.Action.ID == (uint)AID.ArcaneOrbTelegraph)
         {
             _aoes.Add(new(circle, spell.LocXZ, default, WorldState.FutureTime(8.2d)));
         }

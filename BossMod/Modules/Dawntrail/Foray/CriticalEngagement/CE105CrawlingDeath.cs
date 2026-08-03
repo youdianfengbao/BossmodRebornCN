@@ -134,7 +134,7 @@ sealed class ClawingShadow(BossModule module) : Components.GenericAOEs(module)
     private readonly List<AOEInstance> _aoes = [with(4)];
     public static readonly AOEShapeCone Cone = new(50f, 45f.Degrees());
 
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoes.Count > 1 ? CollectionsMarshal.AsSpan(_aoes)[..2] : CollectionsMarshal.AsSpan(_aoes);
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoes.Count > 2 ? CollectionsMarshal.AsSpan(_aoes)[..3] : CollectionsMarshal.AsSpan(_aoes);
 
     public override void OnActorEAnim(Actor actor, uint state)
     {
