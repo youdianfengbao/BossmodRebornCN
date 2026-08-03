@@ -8,6 +8,8 @@ public enum OID : uint
     Boss = 0x4C4F, // R3.8, BNpcName 14791, cornered gemstone
     YellowGem = 0x4C50,
     BoundaryController = 0x4D88, // non-targetable controller at arena center
+    RubyWallTian = 0x1EC045, // baseid 2015301 (decimal), 田 ruby wall (EAnim 2 = appear)
+    RubyWallL = 0x1EC046, // baseid 2015302 (decimal), L/¬ ruby wall (EAnim 20/200 = moving)
     Helper = 0x233C
 }
 
@@ -66,8 +68,9 @@ sealed class TopazRay(BossModule module) : ReplayValidatedCastAOEs(module)
 
 sealed class LethalBoundary(BossModule module) : Components.GenericAOEs(module)
 {
-    private static readonly AOEShapeRect Shape = new(24f, 0.5f, 24f);
-    private static readonly AOEShapeRect AIShape = new(24f, 1f, 24f);
+    // Arena radius is 20y (4x4 grid of 10y cells, trigger XML R=20); the kill fence is that square.
+    private static readonly AOEShapeRect Shape = new(20f, 0.5f, 20f);
+    private static readonly AOEShapeRect AIShape = new(20f, 1f, 20f);
     private readonly AOEInstance[] _aoes = Build(module.Arena.Center);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoes;
@@ -85,65 +88,254 @@ sealed class LethalBoundary(BossModule module) : Components.GenericAOEs(module)
         {
             var normal = (i * 90f).Degrees().ToDirection();
             var rotation = Angle.FromDirection(normal.OrthoL());
-            var origin = center + 24f * normal;
+            var origin = center + 20f * normal;
             result[i] = new(Shape, origin, rotation, color: Colors.Danger, risky: false, shapeDistance: Shape.Distance(origin, rotation));
         }
         return result;
     }
 }
 
-// Reflection helpers use either axis of the square grid: two diagonal helpers own the 20x20
-// pattern, while three helpers on a five-yalm row or column own the 40x40 pattern.
+// North-Horn trigger XML logic (北岛.xml, "08. 叛逆使魔——负隅宝石兽"):
+// - Arena is a 4x4 grid of 10y cells (R=20). Ruby walls (baseid 2015301 田 / 2015302 L-shaped,
+//   EAnim 2 = appear, 20/200 = moving; facing parity selects the table) define four candidate
+//   dangerous regions of four whole cells.
+// - Yellow gemstones (0x4C50) near a cell edge (max |dx|,|dy| >= 2.9y) each contribute one
+//   ColRowDir4 token. Triggernometry's VecToDir uses the game heading convention (x,z),
+//   indexed N=0, W=1, S=2, E=3.
+// - The dangerous region is the candidate whose edge-token set intersects the observed tokens;
+//   announce it as soon as the wall appears so AI can route away before the line resolves.
+internal static class RubyReflectionData
+{
+    // Triggernometry Roundvec indexes cardinal directions from north, counter-clockwise.
+    // (N=0, W=1, S=2, E=3.)
+    public static int VecToDir(float dx, float dz)
+        => (int)MathF.Round((MathF.Atan2(dx, dz) / MathF.PI + 1f) * 2f) & 3;
+
+    // Triggernometry 2.x RadToDir (renamed from roundir): north is a segment point, indexes are
+    // N=0, W=1, S=2, E=3 for n=4.  Implementation mirrors MathParser.ProcessRoundir:
+    //   dir = (rad/pi + 1)/2 * n;  dir = mod(dir + 0.5, n) - 0.5;  round (banker's).
+    public static int RadToDir(float rad, int segments)
+    {
+        var dir = (rad / MathF.PI + 1f) / 2f * segments;
+        dir = Mod(dir + 0.5f, segments) - 0.5f;
+        return (int)MathF.Round(dir, MidpointRounding.ToEven);
+    }
+
+    private static float Mod(float a, float n) => a - MathF.Floor(a / n) * n;
+
+    public static int[] SelectCells(string tableName, IEnumerable<string> edgeGems)
+    {
+        var tokens = edgeGems.ToHashSet(StringComparer.Ordinal);
+        var table = tableName switch
+        {
+            "tian" => WallTableTian,
+            "l20p0" => WallTableL20P0,
+            "l20p1" => WallTableL20P1,
+            "l200p0" => WallTableL200P0,
+            "l200p1" => WallTableL200P1,
+            _ => null
+        };
+        if (table == null)
+            return [];
+
+        var cells = new HashSet<int>();
+        foreach (var zone in table)
+            if (zone.Keys.Any(tokens.Contains))
+                cells.UnionWith(zone.Cells);
+        return [.. cells.Order()];
+    }
+
+    private static readonly (string[] Keys, int[] Cells)[] WallTableTian =
+    [
+        (["122", "213", "222", "223"], [11, 12, 21, 22]),
+        (["130", "230", "233", "243"], [13, 14, 23, 24]),
+        (["311", "321", "322", "422"], [31, 32, 41, 42]),
+        (["330", "331", "341", "430"], [33, 34, 43, 44]),
+    ];
+    private static readonly (string[] Keys, int[] Cells)[] WallTableL20P0 =
+    [
+        (["113", "122", "220", "222", "320", "322", "323"], [11, 12, 22, 32]),
+        (["130", "133", "240", "340", "343"], [13, 14, 24, 34]),
+        (["211", "212", "312", "421", "422"], [21, 31, 41, 42]),
+        (["230", "231", "232", "330", "332", "430", "441"], [23, 33, 43, 44]),
+    ];
+    private static readonly (string[] Keys, int[] Cells)[] WallTableL20P1 =
+    [
+        (["123", "132", "133", "212", "213"], [11, 12, 13, 21]),
+        (["140", "220", "221", "223", "231", "233", "243"], [14, 22, 23, 24]),
+        (["311", "321", "323", "331", "332", "333", "412"], [31, 32, 33, 41]),
+        (["340", "341", "420", "421", "431"], [34, 42, 43, 44]),
+    ];
+    private static readonly (string[] Keys, int[] Cells)[] WallTableL200P0 =
+    [
+        (["112", "213", "221", "223", "231", "232", "233"], [11, 21, 22, 23]),
+        (["120", "123", "133", "240", "243"], [12, 13, 14, 24]),
+        (["311", "312", "421", "431", "432"], [31, 41, 42, 43]),
+        (["320", "321", "323", "331", "333", "341", "440"], [32, 33, 34, 44]),
+    ];
+    private static readonly (string[] Keys, int[] Cells)[] WallTableL200P1 =
+    [
+        (["122", "123", "212", "312", "313"], [11, 12, 21, 31]),
+        (["130", "143", "230", "232", "330", "332", "333"], [13, 23, 33, 14]),
+        (["220", "221", "222", "320", "322", "411", "422"], [22, 32, 41, 42]),
+        (["240", "241", "340", "430", "431"], [24, 34, 43, 44]),
+    ];
+}
+
 sealed class RubyReflection(BossModule module) : Components.GenericAOEs(module)
 {
-    private static readonly AOEShapeRect Short = new(20f, 10f);
-    private static readonly AOEShapeRect Long = new(40f, 20f);
-    private readonly List<AOEInstance> _displayed = [with(3)];
-    private DateTime _activation;
+    private static readonly AOEShapeRect Cell = new(5f, 5f, 5f);
+    private const float EdgeGemMinOffset = 2.9f;
+    // The trigger XML draws the danger region for t:15; keep the same lifetime so old zones
+    // disappear once the mechanic resolves instead of lingering on the floor.
+    private const double DisplayTimeout = 15d;
+    private readonly List<AOEInstance> _displayed = [with(8)];
+    private sealed class GemBatch(DateTime created)
+    {
+        public readonly DateTime Created = created;
+        public readonly HashSet<string> Tokens = [];
+    }
+
+    private readonly List<GemBatch> _gemBatches = [];
+    private GemBatch? _currentBatch;
+    private readonly HashSet<string> _edgeGems = [];
+    private readonly List<(int[] Cells, DateTime Activation)> _zones = [];
+    private int _wallKind = -1;
+    private Angle _wallRot;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         _displayed.Clear();
-        if (_activation == default)
-            return CollectionsMarshal.AsSpan(_displayed);
 
-        foreach (var helper in Module.Enemies((uint)OID.Helper))
+        foreach (var zone in _zones)
         {
-            if (helper.IsDeadOrDestroyed)
-                continue;
-            var offset = helper.Position - Arena.Center;
-            var diagonal = MathF.Abs(MathF.Abs(offset.X) - 10f) < 0.75f && MathF.Abs(MathF.Abs(offset.Z) - 10f) < 0.75f;
-            var column = MathF.Abs(MathF.Abs(offset.X) - 5f) < 0.75f
-                && (MathF.Abs(offset.Z) < 0.75f || MathF.Abs(MathF.Abs(offset.Z) - 20f) < 0.75f);
-            var row = MathF.Abs(MathF.Abs(offset.Z) - 5f) < 0.75f
-                && (MathF.Abs(offset.X) < 0.75f || MathF.Abs(MathF.Abs(offset.X) - 20f) < 0.75f);
-            var shape = diagonal ? Short : column || row ? Long : null;
-            if (shape != null)
-                _displayed.Add(new(shape, helper.Position, helper.Rotation, _activation, Colors.Danger, true,
-                    helper.InstanceID, shape.Distance(helper.Position, helper.Rotation)));
+            foreach (var cell in zone.Cells)
+            {
+                var col = cell / 10;
+                var row = cell % 10;
+                // Triggernometry's PictoACT position is in the same world X/Z basis as WPos.
+                // Pos=(col-2.5)*10,(row-2)*10 is the lower edge of a 10y cell; AOEShapeRect is
+                // centered, so use the cell center (row-2.5) here and do not rotate the grid.
+                var center = Arena.Center + new WDir((col - 2.5f) * 10f, (row - 2.5f) * 10f);
+                _displayed.Add(new(Cell, center, activation: zone.Activation, color: Colors.Danger, risky: true,
+                    shapeDistance: Cell.Distance(center, default)));
+            }
         }
         return CollectionsMarshal.AsSpan(_displayed);
     }
 
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (ref readonly var aoe in ActiveAOEs(slot, actor))
+            hints.AddForbiddenZone(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation), aoe.Activation);
+    }
+
     public override void Update()
     {
-        if (_activation != default && WorldState.CurrentTime > _activation.AddSeconds(1d))
-            _activation = default;
+        var now = WorldState.CurrentTime;
+        _zones.RemoveAll(z => now > z.Activation.AddSeconds(DisplayTimeout));
+    }
+
+    public override void OnActorEAnim(Actor actor, uint state)
+    {
+        if (actor.OID is (uint)OID.RubyWallTian or (uint)OID.RubyWallL)
+            Service.Logger.Information($"[CE206] wall EAnim oid={actor.OID:X} p1={(state >> 16) & 0xFFFF:X4} p2={state & 0xFFFF:X4} rot={actor.Rotation.Rad:f3}");
+        var anim = state & 0xFFF;
+        if (actor.OID == (uint)OID.RubyWallTian && anim == 2)
+            SetWall(0, actor.Rotation);
+        // The ACT log line prints these anim values in hex: "2" == 0x02 (appear), "20" == 0x20 (L
+        // moving), "200" == 0x200 (¬ moving). Decimal 20/200 are accepted too as a belt-and-braces
+        // fallback in case a client reports them as raw decimal.
+        else if (actor.OID == (uint)OID.RubyWallL && (anim is 0x20 or 0x200 or 20 or 200))
+            SetWall(anim is 0x20 or 20 ? 1 : 3, actor.Rotation);
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.RubyOuterReflection && !spell.EventHappened)
-            _activation = Module.CastFinishAt(spell, 4d);
+        if (spell.Action.ID == (uint)AID.YellowGemstones)
+        {
+            // Keep a snapshot per BC98. A second BC98 may arrive while the wall from the
+            // previous snapshot is still resolving; overwriting one shared set loses that
+            // wall's real gemstones.
+            _currentBatch = new(WorldState.CurrentTime);
+            _gemBatches.Add(_currentBatch);
+            if (_gemBatches.Count > 8)
+                _gemBatches.RemoveAt(0);
+            _edgeGems.Clear();
+            _zones.Clear();
+            Service.Logger.Information($"[CE206] BC98 batch created idx={_gemBatches.Count - 1}");
+        }
     }
 
-    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    public override void OnActorPlayActionTimelineEvent(Actor actor, ushort id)
     {
-        if (spell.Action.ID is (uint)AID.RubyReflectionShort or (uint)AID.RubyReflectionLong1 or (uint)AID.RubyReflectionLong2)
+        if (actor.OID != (uint)OID.YellowGem || id != 0x2489)
+            return;
+
+        var pos = actor.Position;
+        // Triggernometry rounds half-values away from zero for this positive grid coordinate.
+        var col = (int)MathF.Floor((pos.X + 25f - Arena.Center.X) / 10f + 0.5f);
+        var row = (int)MathF.Floor((pos.Z + 25f - Arena.Center.Z) / 10f + 0.5f);
+        if (col is < 1 or > 4 || row is < 1 or > 4)
+            return;
+
+        var dx = pos.X - Arena.Center.X - (col - 2.5f) * 10f;
+        var dz = pos.Z - Arena.Center.Z - (row - 2.5f) * 10f;
+        if (MathF.Max(MathF.Abs(dx), MathF.Abs(dz)) >= EdgeGemMinOffset)
         {
-            _activation = default;
+            // VecToDir(dx, dz, 4) uses atan2(x,z), matching Angle.FromDirection/WPos heading.
+            // Using atan2(z,x)+2 (the old code) rotates every edge token and selects the wrong
+            // region or no region at all.
+            var dir = RubyReflectionData.VecToDir(dx, dz);
+            var token = $"{col}{row}{dir}";
+            _edgeGems.Add(token);
+            _currentBatch?.Tokens.Add(token);
+            Service.Logger.Information($"[CE206] gem PAT id={actor.InstanceID:X} pos=({pos.X:f2},{pos.Z:f2}) cell={col}{row} d=({dx:f2},{dz:f2}) dir={dir} token={col}{row}{dir}");
+        }
+    }
+
+    private void SetWall(int kind, Angle rotation)
+    {
+        _wallKind = kind;
+        _wallRot = rotation;
+        // Use the most recent gem batch created within the last 15s that actually collected PAT
+        // tokens (gems may be repositioned in several PAT waves before the wall appears; the last
+        // wave is the one the wall resolves). Fall back to the shared edge set if no batch has
+        // tokens yet (e.g. the wall EAnim arrived before the gem PAT events).
+        var now = WorldState.CurrentTime;
+        var batchIndex = _gemBatches.Count - 1;
+        while (batchIndex >= 0 && (now - _gemBatches[batchIndex].Created).TotalSeconds > DisplayTimeout)
+            --batchIndex;
+        while (batchIndex >= 0 && _gemBatches[batchIndex].Tokens.Count == 0)
+            --batchIndex;
+        var tokens = (batchIndex >= 0 ? _gemBatches[batchIndex].Tokens : _edgeGems).ToArray();
+        _edgeGems.Clear();
+        _edgeGems.UnionWith(tokens);
+        var cells = Recalculate();
+        Service.Logger.Information($"[CE206] wall set kind={kind} rot={rotation.Rad:f3} tokens=[{string.Join(",", _edgeGems)}] cells=[{string.Join(",", cells)}]");
+        if (cells.Length != 0)
+        {
+            _zones.Add((cells, WorldState.CurrentTime));
             ++NumCasts;
         }
+    }
+
+    private int[] Recalculate()
+    {
+        if (_wallKind < 0)
+            return [];
+
+        // Triggernometry RadToDir(h,4) % 2 (h follows the game heading convention: 0 = south,
+        // CCW, so east = +pi/2 - identical to BossMod's Angle.Rad).
+        var parity = RubyReflectionData.RadToDir(_wallRot.Rad, 4) % 2;
+        var tableName = _wallKind switch
+        {
+            0 => "tian",
+            1 => parity == 0 ? "l20p0" : "l20p1",
+            3 => parity == 0 ? "l200p0" : "l200p1",
+            _ => ""
+        };
+        return RubyReflectionData.SelectCells(tableName, _edgeGems);
     }
 }
 
@@ -168,7 +360,7 @@ sealed class SDAsideKnockbackInAABBSquare(WPos center, WPos origin, WDir facing,
     public override bool RowIntersectsShape(WPos rowStart, WDir dx, float width, float cushion = default) => true;
 }
 
-sealed class SDAsideThenRadialKnockbackInAABBSquare(WPos center, WPos asideOrigin, WDir asideFacing, float asideDistance, WPos circleOrigin, float circleDistance, float halfWidth) : ShapeDistance
+sealed class SDAsideThenCenterPullInAABBSquare(WPos center, WPos asideOrigin, WDir asideFacing, float asideDistance, float pullDistance, float halfWidth) : ShapeDistance
 {
     public override bool Contains(in WPos p)
     {
@@ -176,8 +368,11 @@ sealed class SDAsideThenRadialKnockbackInAABBSquare(WPos center, WPos asideOrigi
         if (!p1.InSquare(center, halfWidth))
             return true;
 
-        var radial = (p1 - circleOrigin).Normalized();
-        var p2 = radial == default ? p1 : p1 + circleDistance * radial;
+        // The second hit pulls the player back toward the arena center (ARR player displacement:
+        // C163 lands ~15y aside, C162 then carries the survivor ~20y back toward center, e.g.
+        // x_enc -25502 -> -24911 on both recorded rounds).
+        var toward = center - p1;
+        var p2 = toward == default ? p1 : p1 + pullDistance * toward.Normalized();
         return !p2.InSquare(center, halfWidth);
     }
 
@@ -186,13 +381,19 @@ sealed class SDAsideThenRadialKnockbackInAABBSquare(WPos center, WPos asideOrigi
     public override bool RowIntersectsShape(WPos rowStart, WDir dx, float width, float cushion = default) => true;
 }
 
-// BCA0 resolves as a 30y radial knockback away from its helper about six seconds after the
-// telegraph. Keep it visible for the full setup so both knockbacks are solved as one route.
+// BCA0 resolves about six seconds after the telegraph as a 20y pull toward the arena center
+// (replay: after the 15y aside lands at x ~= 223.4, both recorded survivors move to x ~= 243.4).
+// The earlier AwayFromOrigin 30y interpretation was wrong - it pushed players into the fence.
 sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(module)
 {
     private static readonly AOEShapeCircle Shape = new(60f);
-    private const float Distance = 30f;
-    private const float SafeHalfWidth = 23f;
+    internal const float Distance = 20f;
+    private const float SafeHalfWidth = 19f;
+    // The second knockback's safe landing is hardcoded to where the first shove direction meets
+    // the electric fence (arena edge): push the small zone out to ~14y from center (radius 5
+    // covers 9..19, just inside the 19y boundary/电网).
+    private const float SecondSafeOffset = 14f;
+    private const float SecondSafeRadius = 5f;
     private const double HitDelay = 6.0d;
     private readonly List<Knockback> _casters = [];
     private readonly List<Knockback> _displayed = [with(4)];
@@ -208,6 +409,26 @@ sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(
 
     public override void Update() => PruneExpired();
 
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    {
+        // Second knockback: safe landing is hardcoded to where the first shove direction meets the
+        // electric fence (arena edge). Only show it when the second hit is imminent so it does not
+        // appear too early.
+        var aside = Module.FindComponent<KnockAside>();
+        if (aside?.CurrentAsideDir is not { } t)
+            return;
+        var imminent = false;
+        foreach (var kb in _casters)
+            if ((kb.Activation - WorldState.CurrentTime).TotalSeconds <= 3d)
+            {
+                imminent = true;
+                break;
+            }
+        if (!imminent)
+            return;
+        Arena.ZoneCircle(Arena.Center + t * SecondSafeOffset, SecondSafeRadius, Colors.Safe);
+    }
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         var aside = Module.FindComponent<KnockAside>();
@@ -216,22 +437,24 @@ sealed class CircularKnockback(BossModule module) : Components.GenericKnockback(
             // Before C163, solve both hits from the candidate start: the first displacement can
             // differ by side even for two players in the same packet. After C163, only C162 remains.
             if (aside == null || !aside.AddCombinedAIHint(kb, hints))
-                hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Arena.Center, kb.Origin, kb.Distance, SafeHalfWidth), kb.Activation);
+                hints.AddForbiddenZone(new SDKnockbackInAABBSquareTowardsOrigin(Arena.Center, kb.Origin, kb.Distance, SafeHalfWidth), kb.Activation);
         }
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.CircularKnockbackTelegraph)
+        // The same action can arrive with extra high bytes (e.g. 0x4BCA0); only the low 16 bits
+        // are the real action id.
+        if ((spell.Action.ID & 0xFFFF) == (uint)AID.CircularKnockbackTelegraph)
         {
             _casters.RemoveAll(k => k.ActorID == caster.InstanceID);
-            _casters.Add(new(spell.LocXZ, Distance, Module.CastFinishAt(spell).AddSeconds(HitDelay), Shape, spell.Rotation, Kind.AwayFromOrigin, actorID: caster.InstanceID));
+            _casters.Add(new(Arena.Center, Distance, Module.CastFinishAt(spell).AddSeconds(HitDelay), Shape, spell.Rotation, Kind.TowardsOrigin, actorID: caster.InstanceID));
         }
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
-        if (spell.Action.ID == (uint)AID.RavenousGodsCircleHit)
+        if ((spell.Action.ID & 0xFFFF) == (uint)AID.RavenousGodsCircleHit)
         {
             _casters.Clear();
             ++NumCasts;
@@ -251,7 +474,7 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
 {
     private static readonly AOEShapeRect Shape = new(40f, 30f);
     private const float Distance = 15f;
-    private const float SafeHalfWidth = 23f;
+    private const float SafeHalfWidth = 19f;
     private const double HitDelay = 5.1d;
 
     private sealed class AsideSource(WPos asidePos, WPos circlePos, Angle facing, DateTime activation, ulong actorID)
@@ -268,14 +491,20 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
     private readonly List<AsideSource> _sources = [];
     private readonly List<(WPos AsidePos, Angle Facing, DateTime Activation, ulong ActorID)> _pendingAside = [];
     private readonly List<Knockback> _displayed = [with(4)];
+    private WDir? _lastAsideDir;
+    private DateTime _lastAsideSeen;
+
+    // The lateral shove direction of the current aside. It survives the C163 resolution (sources
+    // are cleared) so the second-stage safe zone keeps being drawn on that half-field.
+    public WDir? CurrentAsideDir => WorldState.CurrentTime <= _lastAsideSeen.AddSeconds(15d) ? _lastAsideDir : null;
 
     public bool AddCombinedAIHint(Knockback circle, AIHints hints)
     {
         foreach (var source in _sources)
             if (source.Activation < circle.Activation && source.CirclePos.AlmostEqual(circle.Origin, 0.5f))
             {
-                hints.AddForbiddenZone(new SDAsideThenRadialKnockbackInAABBSquare(Arena.Center, source.AsidePos,
-                    source.Facing.ToDirection(), Distance, circle.Origin, circle.Distance, SafeHalfWidth), source.Activation);
+                hints.AddForbiddenZone(new SDAsideThenCenterPullInAABBSquare(Arena.Center, source.AsidePos,
+                    source.Facing.ToDirection(), Distance, CircularKnockback.Distance, SafeHalfWidth), source.Activation);
                 return true;
             }
         return false;
@@ -290,6 +519,17 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
         return CollectionsMarshal.AsSpan(_displayed);
     }
 
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    {
+        // First knockback (C163, 15y lateral). The safe lane runs from the arena center to the
+        // electric fence on the shove side only - split by half-field, not spanning both sides.
+        foreach (var source in _sources)
+        {
+            var asideDir = source.Facing.ToDirection().OrthoR();
+            Arena.AddRect(Arena.Center, asideDir, 19f, 0f, 4f, Colors.Safe, 2f);
+        }
+    }
+
     public override void Update() => PruneExpired();
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
@@ -300,7 +540,7 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        switch (spell.Action.ID)
+        switch (spell.Action.ID & 0xFFFF)
         {
             case (uint)AID.KnockAsideTelegraph:
                 _pendingAside.RemoveAll(p => p.ActorID == caster.InstanceID);
@@ -314,6 +554,8 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
                     var p = _pendingAside[i];
                     _sources.RemoveAll(s => s.ActorID == p.ActorID);
                     _sources.Add(new(p.AsidePos, spell.LocXZ, p.Facing, p.Activation, p.ActorID));
+                    _lastAsideDir = p.Facing.ToDirection().OrthoR();
+                    _lastAsideSeen = WorldState.CurrentTime;
                     _pendingAside.RemoveAt(i);
                 }
                 break;
@@ -322,7 +564,7 @@ sealed class KnockAside(BossModule module) : Components.GenericKnockback(module)
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
-        if (spell.Action.ID == (uint)AID.RavenousGodsAsideHit)
+        if ((spell.Action.ID & 0xFFFF) == (uint)AID.RavenousGodsAsideHit)
         {
             _sources.Clear();
             _pendingAside.Clear();
@@ -374,6 +616,5 @@ sealed class RebelliousFamiliarStates : StateMachineBuilder
     GroupID = 1093u,
     NameID = 56u,
     SortOrder = 5)]
-// The electric fence is a square: replay player positions reach the corners and BFD0 lethal hits
-// cluster at |x|/|z| ~= 24 from center, so the arena and knockback safety checks use a 24y square.
-public sealed class RebelliousFamiliar(WorldState ws, Actor primary) : BossModule(ws, primary, new(238f, 352f), new ArenaBoundsSquare(24f));
+// The arena is a 20y square: the floor is a 4x4 grid of 10y cells (North-Horn trigger XML R=20).
+public sealed class RebelliousFamiliar(WorldState ws, Actor primary) : BossModule(ws, primary, new(238f, 352f), new ArenaBoundsSquare(20f));
