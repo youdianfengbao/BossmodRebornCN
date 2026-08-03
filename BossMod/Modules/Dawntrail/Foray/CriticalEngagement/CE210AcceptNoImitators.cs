@@ -93,6 +93,19 @@ sealed class MorphingMageAOEs(BossModule module) : ReplayValidatedCastAOEs(modul
     // Keep simultaneous casts dangerous, but later preview steps must not block AI movement yet.
     protected override double RiskyActivationWindow => 0.5d;
 
+    // 2026-08-02 user request: the CycloneCrossing cross telegraph paints the whole screen deep
+    // yellow whenever it grades imminent (0.5s window); pin it pale yellow (Colors.AOE) like the
+    // Made Magic circles. Risky grading stays on the framework's window.
+    protected override bool FixedColor(uint actionID, out uint color)
+    {
+        if (actionID == (uint)AID.CycloneCrossing)
+        {
+            color = Colors.AOE;
+            return true;
+        }
+        return base.FixedColor(actionID, out color);
+    }
+
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
         (uint)AID.TongueOfFlame => new(Tongue),
@@ -194,8 +207,10 @@ sealed class MadeMagic(BossModule module) : Components.GenericAOEs(module)
         // Fixed filled circle at the wave's maximum radius instead of per-step thin rings: the
         // previous expanding donut visually misled (never cleared until the next mechanic) and
         // offered no surf path. Visual only (risky: false); avoidance is handled by AddAIHints.
+        // 2026-08-02 user request: four full-screen 17.5y circles in deep yellow (Colors.Danger)
+        // are harsh to look at; draw them pale yellow (Colors.AOE) instead.
         var shape = new AOEShapeCircle(MaxRadius);
-        _pending[actor.InstanceID] = new(shape, actor.Position, color: Colors.Danger, risky: false,
+        _pending[actor.InstanceID] = new(shape, actor.Position, color: Colors.AOE, risky: false,
             activation: WorldState.FutureTime(0.3f), actorID: actor.InstanceID, shapeDistance: shape.Distance(actor.Position, default));
         _extra[actor.InstanceID] = extra;
         // Status 1909 lives ~163s (until the next mechanic); give the pulse activation a hard cap

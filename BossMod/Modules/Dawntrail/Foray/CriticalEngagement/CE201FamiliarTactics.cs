@@ -46,7 +46,10 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeCircle Shape = new(4f);
     private static readonly AOEShapeCircle AIShape = new(5.5f);
-    private const float PredictionLength = 8f;
+    // 2026-08-02 user request: shrink the movement-prediction capsule 8y -> 6.5y (half-width 5.5f
+    // and the 5.5y body circle stay unchanged) - the 8y lead over-reacted to fast blade sweeps
+    // and pushed the AI out of the safe pocket early.
+    private const float PredictionLength = 6.5f;
     private readonly List<Actor> _blades = module.Enemies((uint)OID.AlabasterBlade);
     private readonly List<AOEInstance> _active = [with(8)];
 
@@ -81,6 +84,35 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
             // preview color reads as non-risky and automation has no reason to avoid the blade.
             _active.Add(new(Shape, origin, color: Colors.Danger, actorID: blade.InstanceID, shapeDistance: Shape.Distance(origin, default)));
         }
+    }
+}
+
+// 2026-08-02 cyclone dodge zone (replay 22_29_52.log): the boss reads 47536
+// (InspiritedHurricaneVisual, ~4.0s), then EIGHT 0x4BDA blades spawn on the cardinal/diagonal
+// cross and rotate clockwise around the boss (= arena center) at ~11.5°/s, sweeping the whole
+// arena on orbit rings ~r10/18/26; the pattern resolves when 47532/47534 (InspiritedCyclone
+// visual + circle) land. The only safe pocket for the whole rotation is the r<8 zone under the
+// boss. Show a green circle there while any blade is alive and drive the AI into it with a
+// high-weight goal (above UnbowedSpirit's 10 and BladePatterns' 20, so the AI actually heads
+// into the pocket instead of just keeping its distance). Blade presence is the trigger/end
+// signal - no event-window state machine to miss or leak.
+sealed class BladeDodgeZone(BossModule module) : BossComponent(module)
+{
+    private const float SafeRadius = 8f; // boss's feet: safe for the whole rotation (replay)
+    private const float GoalWeight = 30f; // beats the other CE201 goal weights
+
+    private bool BladesActive => Module.Enemies((uint)OID.AlabasterBlade).Any(blade => !blade.IsDeadOrDestroyed);
+
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    {
+        if (BladesActive)
+            Arena.ZoneCircleOutline(Arena.Center, SafeRadius, Colors.Safe);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (BladesActive)
+            hints.GoalZones.Add(AIHints.GoalSingleTarget(Arena.Center, SafeRadius, GoalWeight));
     }
 }
 
@@ -322,6 +354,7 @@ sealed class FamiliarTacticsStates : StateMachineBuilder
             .ActivateOnEnter<FamiliarRaidwides>()
             .ActivateOnEnter<BatteringArms>()
             .ActivateOnEnter<UnbowedSpirit>()
+            .ActivateOnEnter<BladeDodgeZone>()
             .ActivateOnEnter<BladePatterns>()
             .ActivateOnEnter<SpinningSweep>();
     }
@@ -341,7 +374,10 @@ sealed class FamiliarTacticsStates : StateMachineBuilder
     SortOrder = 0)]
 // Crosswind recordings place every unharmed player on the outer safe pockets at roughly 28.5y
 // from center. A 20y pathfinding boundary makes those legitimate solutions unreachable.
-public sealed class FamiliarTactics(WorldState ws, Actor primary) : BossModule(ws, primary, new(-390f, 700f), new ArenaBoundsCircle(30f))
+// 2026-08-02 user request: shrink the arena boundary 0.5y - the 30y circle overstates the real
+// playable floor, so pathfinding can route the AI (or the pilot) past where the fence actually
+// kills. 28.5y safe pockets still fit inside the 29.5y boundary.
+public sealed class FamiliarTactics(WorldState ws, Actor primary) : BossModule(ws, primary, new(-390f, 700f), new ArenaBoundsCircle(29.5f))
 {
     protected override void DrawEnemies(int pcSlot, Actor pc)
     {

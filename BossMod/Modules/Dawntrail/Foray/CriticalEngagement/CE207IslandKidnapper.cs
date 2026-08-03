@@ -38,20 +38,79 @@ public enum AID : uint
 
 sealed class WindBoundary(BossModule module) : Components.GenericAOEs(module)
 {
-    // The wall is lethal from 19y outward; draw it accurately for the human overlay but mark it
-    // non-risky so the AI zone below can use a tighter inner radius.
-    private static readonly AOEShapeDonut Visual = new(19f, 30f);
+    // The wall is lethal from ~24.5y outward (replay 10_55_27.log: farthest survivor 22.6y,
+    // wall-kill deaths 24.9-26.2y, anchor B94B death-wall check every second); draw it accurately
+    // for the human overlay but mark it non-risky so the AI zone below can use a tighter radius.
+    // 2026-08-03: re-measured 24.5f inner radius (was 19f under the old 20y-arena assumption).
+    private static readonly AOEShapeDonut Visual = new(24.5f, 30f);
     // Give the AI a 2y buffer inside the true wall. The rotating WindBloom ice-flowers are 13y
-    // circles emitted from the 16y ring, so the only safe pocket is near dead center; without a
-    // buffer, squeezing away from a bloom can round the destination onto the 19y deathwall. Keeping
-    // the AI at or inside 17y guarantees it never clips the wall while dodging blooms.
-    private static readonly AOEShapeDonut Forbidden = new(17f, 30f);
+    // circles emitted from the 16y ring, so dodging a bloom can squeeze the AI outward toward the
+    // wall; keeping it at or inside 22.5y guarantees it never clips the 24.5y deathwall while
+    // dodging blooms. 2026-08-03: 22.5f from replay re-measure (was 17f for the old 19y wall).
+    private static readonly AOEShapeDonut Forbidden = new(22.5f, 30f);
+    // 2026-08-02 GaleBlade (0xB951): the boss teleports to the arena rim and sweeps a 180-degree
+    // cone over most of the floor (user-verified); the only safe pocket is the rim BEHIND the boss
+    // (~r18-24), which the flat 22.5-30y forbidden donut covers - so the AI sees no valid path and
+    // flounders mid-arena. While the cast is live, replace the donut with two 140-degree sectors
+    // whose union leaves an ~80-degree gap (gapCenter +/- 40deg) behind the boss. The 22.5y inner
+    // radius stays everywhere else, preserving the WindBloom wall buffer; GaleBlade's own cone
+    // forbidden zone blocks the arena inside, funneling the AI into the gap. A goal zone on the
+    // gap (25 weight, above the other CE207 goals) drives the AI there explicitly - forbidden
+    // zones are hard constraints the AI must leave, goals are what it heads toward.
+    // 2026-08-03: gap band re-measured 18-24y (safe rim behind the boss reaches the 24.5y wall).
+    private const float GaleInner = 18f;
+    private const float GaleOuter = 24f;
+    private const double GaleSafeWindow = 8d; // read is ~5-6s; keep the gap ~2s after it resolves
+    private static readonly AOEShapeDonutSector GaleSector = new(GaleInner, GaleOuter, 140f.Degrees());
     private readonly AOEInstance[] _aoe = [new(Visual, module.Arena.Center, risky: false)];
+    private bool _galeActive;
+    private DateTime _galeUntil;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
-        => hints.AddForbiddenZone(Forbidden, Module.Arena.Center);
+    {
+        if (_galeActive)
+        {
+            var gapCenter = Angle.FromDirection(Module.PrimaryActor.Position - Module.Arena.Center) + 180f.Degrees();
+            hints.AddForbiddenZone(GaleSector, Module.Arena.Center, gapCenter + 90f.Degrees());
+            hints.AddForbiddenZone(GaleSector, Module.Arena.Center, gapCenter - 90f.Degrees());
+            // explicit goal in the gap: ring 18-24y behind the boss, within 45 degrees of the gap
+            // center (the arena bounds still cap pathfinding at the 25y rim; the wall is 24.5y)
+            hints.GoalZones.Add(position =>
+            {
+                var offset = position - Module.Arena.Center;
+                var dist = offset.Length();
+                var angleDiff = MathF.Abs((Angle.FromDirection(offset) - gapCenter).Normalized().Deg);
+                return dist is >= 18f and <= 24f && angleDiff <= 45f ? 25f : 0f;
+            });
+        }
+        else
+        {
+            hints.AddForbiddenZone(Forbidden, Module.Arena.Center);
+        }
+    }
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.GaleBlade && !spell.EventHappened)
+        {
+            _galeActive = true;
+            _galeUntil = WorldState.CurrentTime.AddSeconds(GaleSafeWindow);
+        }
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.GaleBlade)
+            _galeActive = false;
+    }
+
+    public override void Update()
+    {
+        if (_galeActive && WorldState.CurrentTime > _galeUntil)
+            _galeActive = false;
+    }
 }
 
 sealed class KidnapperAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
@@ -90,7 +149,13 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
     private const float RingThreshold = 16f;
     private const float ContactRadius = 4.5f;
     private static readonly Angle TrackHalfAngle = 15f.Degrees(); // 30 degrees of track ahead of the storm (half-angle 15 deg)
-    private const float BaselineDriftSq = 9f; // 3y of extrapolation error before re-anchoring
+    // 2026-08-03: re-anchor threshold widened 3y -> 5y. The R20 ring storms move at ~3.0y/s, so
+    // the per-second position packets step ~3y - exactly the old 3y threshold - which re-anchored
+    // every packet and hard-cut StartPos/StartTime, making RendingWindTelegraphs' Predict(activation)
+    // jump once per second (user-verified "blinking"). With 5y the per-second step never trips it;
+    // Predict stays continuous frame-to-frame and re-anchoring only happens on real drift (every
+    // 2-5s at most).
+    private const float BaselineDriftSq = 25f; // 5y of extrapolation error before re-anchoring
     private const float DetectMoveSq = 1f; // 1y of first MOVE displacement is enough to measure the turn direction
     private const double MinDirectionDt = 1d; // require at least 1s between registration and the first MOVE
     private static readonly AOEShapeCircle Shape = new(ContactRadius);
@@ -311,9 +376,22 @@ sealed class RendingWindTelegraphs(BossModule module) : Components.GenericAOEs(m
 sealed class GustWallKnockbacks(BossModule module) : Components.GenericKnockback(module)
 {
     private static readonly AOEShapeRect Shape = new(60f, 30f); // same rect as GustKnockback
+    // 2026-08-03 user request: the breeze preview must dodge like the real gust - same push and
+    // wall-radius as GustKnockback (24y / 24.5y wall), direction = wall across the arena.
+    private const float Distance = 24f;
+    private const float SafeRadius = 24.5f;
     private readonly List<Knockback> _displayed = [with(1)];
     private WPos _wallPos;
     private bool _suppressed; // BC7A cast in progress - GustKnockback owns the preview
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (_wallPos == default || _suppressed)
+            return;
+        var dir = Angle.FromDirection(Module.Arena.Center - _wallPos); // wind blows wall -> arena
+        hints.AddForbiddenZone(new SDKnockbackInCircleFixedDirection(Arena.Center, Distance * dir.ToDirection(), SafeRadius),
+            WorldState.FutureTime(7.1d)); // same activation as the preview knockback
+    }
 
     public override void OnActorCreated(Actor actor)
     {
@@ -371,8 +449,15 @@ sealed class GustWallKnockbacks(BossModule module) : Components.GenericKnockback
 sealed class GustKnockback(BossModule module) : Components.GenericKnockback(module)
 {
     private static readonly AOEShapeRect Shape = new(60f, 30f);
-    private const float Distance = 24f;
-    private const float SafeRadius = 19f;
+    // 2026-08-03 user request: 25.5y (+1.5y) gives the AI more landing tolerance past the
+    // telegraph's nominal 24y push; the SDKnockbackInCircleFixedDirection forbidden zone in
+    // AddAIHints consumes this constant, so display and AI stay in sync.
+    private const float Distance = 25.5f;
+    // Knockback landing radius that stays inside the death wall: the wall inner edge is 24.5y
+    // (replay 10_55_27.log, re-measured 2026-08-03), so any landing point within 24.5y is safe.
+    // 19f was the old 19y-wall value - keeping it would ban every landing beyond 19y and strand
+    // the AI off the outer rim (landings up to 24.5y are actually safe now).
+    private const float SafeRadius = 24.5f;
     // Replay event timing is consistently about 0.60s after the helper cast finishes. Using the
     // old 1.05s estimate scheduled the safe-edge constraint roughly 0.4s after the real knockback.
     private const double HitDelay = 0.60d;
@@ -427,6 +512,19 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
         _casters.RemoveAll(kb => now > kb.Activation.AddSeconds(1d));
     }
 }
+// 2026-08-03 user request: a weak center bias (4y circle, weight 5) so the AI drifts toward the
+// middle when nothing else guides it. Higher-weight goals override it (WindBoundary's gap goal
+// is 25, knockback dodges are stricter) and forbidden zones always win, so the bias never fights
+// a mechanic. The center is always safe: the wall forbids r>22.5.
+sealed class CenterBias(BossModule module) : BossComponent(module)
+{
+    private const float Radius = 4f;
+    private const float Weight = 5f;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+        => hints.GoalZones.Add(AIHints.GoalSingleTarget(Arena.Center, Radius, Weight));
+}
+
 // B94C resolves into the BBF8 helper raidwide about 0.9s after the boss cast. BC7A similarly
 // resolves into B950 while applying the directional knockback.
 sealed class KidnapperRaidwides(BossModule module) : Components.RaidwideCasts(module, [(uint)AID.HurricaneVisual, (uint)AID.GustTelegraph]);
@@ -443,6 +541,7 @@ sealed class IslandKidnapperStates : StateMachineBuilder
             .ActivateOnEnter<RendingWindTelegraphs>()
             .ActivateOnEnter<GustWallKnockbacks>()
             .ActivateOnEnter<GustKnockback>()
+            .ActivateOnEnter<CenterBias>()
             .ActivateOnEnter<KidnapperRaidwides>();
     }
 }
@@ -459,4 +558,7 @@ sealed class IslandKidnapperStates : StateMachineBuilder
     GroupID = 1093u,
     NameID = 61u,
     SortOrder = 6)]
-public sealed class IslandKidnapper(WorldState ws, Actor primary) : BossModule(ws, primary, new(-150f, -860f), new ArenaBoundsCircle(20f));
+// 2026-08-03: arena radius re-measured 25y (replay 10_55_27.log: farthest survivor 22.6y,
+// wall-kill deaths 24.9-26.2y) - the old 20f boundary was smaller than the real playable floor,
+// which made the AI pathfind too conservatively around the rim pockets.
+public sealed class IslandKidnapper(WorldState ws, Actor primary) : BossModule(ws, primary, new(-150f, -860f), new ArenaBoundsCircle(25f));

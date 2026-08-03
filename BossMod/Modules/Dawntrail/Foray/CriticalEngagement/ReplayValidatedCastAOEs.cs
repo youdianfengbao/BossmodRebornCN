@@ -39,6 +39,14 @@ abstract class ReplayValidatedCastAOEs(BossModule module) : Components.GenericAO
     // Some mechanics split one timeline across several components. Let a component contribute an
     // earlier activation so later previews stay visible without becoming forbidden too soon.
     protected virtual DateTime? CompetingActivation => null;
+    // Some telegraphs keep a fixed display color regardless of the risk-window grading (e.g.
+    // CE210's CycloneCrossing cross: user-requested pale yellow 2026-08-02). Returning true pins
+    // the color; the risky flag still follows the framework's window grading.
+    protected virtual bool FixedColor(uint actionID, out uint color)
+    {
+        color = default;
+        return false;
+    }
 
     public DateTime? EarliestActivation
     {
@@ -71,6 +79,8 @@ abstract class ReplayValidatedCastAOEs(BossModule module) : Components.GenericAO
                 aoe.Color = imminent ? Colors.Danger : Colors.AOE;
                 aoe.Risky = imminent;
             }
+            if (FixedColor(_pending[i].ActionID, out var fixedColor))
+                aoe.Color = fixedColor; // pinned display color wins; risky keeps the grading
             _displayed.Add(aoe);
         }
         return CollectionsMarshal.AsSpan(_displayed);
