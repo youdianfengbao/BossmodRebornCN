@@ -238,6 +238,17 @@ sealed class IceBreathSequence(BossModule module) : Components.GenericAOEs(modul
 }
 
 sealed class IceRoar(BossModule module) : Components.SimpleAOEs(module, (uint)AID.IceRoar, new AOEShapeCircle(12f));
+// Every ice orb draws a faint 8y circle so the player can see its position and burst range
+// before the IceBreath cone reaches it; display only - never risky, no AI hints.
+sealed class IceOrbTracker(BossModule module) : BossComponent(module)
+{
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    {
+        foreach (var orb in Module.Enemies((uint)OID.IceOrb))
+            if (!orb.IsDeadOrDestroyed)
+                Arena.ZoneCircleOutline(orb.Position, 8f, Colors.AOE, 2f);
+    }
+}
 sealed class ChaoticChorus(BossModule module) : Components.SimpleAOEs(module, (uint)AID.ChaoticChorus, new AOEShapeCircle(6f));
 // Ice orbs begin their 0.7s casts roughly one second after Ram's Voice resolves. Retain the center
 // circle briefly so navigation does not immediately run back in, then reverse course as the first
@@ -268,6 +279,7 @@ sealed class RegnantChimeraStates : StateMachineBuilder
             .ActivateOnEnter<IceBreathSequence>()
             .ActivateOnEnter<Duobreath>()
             .ActivateOnEnter<IceRoar>()
+            .ActivateOnEnter<IceOrbTracker>()
             .ActivateOnEnter<ChaoticChorus>()
             .ActivateOnEnter<RamsVoice>()
             .ActivateOnEnter<DragonsVoice>();
