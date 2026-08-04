@@ -199,7 +199,12 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
             var actionID = kind == ChainSchedule.Kind.Circle ? (uint)AID.PlaincrackerInstruction : kind == ChainSchedule.Kind.Cone ? (uint)AID.BadBreathInstruction : pending.ActionID;
             var shape = kind == ChainSchedule.Kind.Circle ? PlaincrackerLarge : kind == ChainSchedule.Kind.Cone ? BadBreath : pending.Shape;
             var follow = pending.FollowCaster && !(sched.Reverse && sched.SwapDone);
-            _pending[i] = pending with { ActionID = actionID, Shape = shape, Origin = pos ?? pending.Origin, FollowCaster = follow };
+            var origin = pos ?? pending.Origin;
+            // While the swap cast freezes the preview, the cone must face the arena center (C->O,
+            // the actual cast direction). The tether-time keeper rotation is not the cone heading -
+            // without this the cone points the wrong way until the first real cast overrides it.
+            var rotation = !follow && kind == ChainSchedule.Kind.Cone ? Angle.FromDirection(Arena.Center - origin) : pending.Rotation;
+            _pending[i] = pending with { ActionID = actionID, Shape = shape, Origin = origin, Rotation = rotation, FollowCaster = follow };
         }
     }
 

@@ -28,6 +28,7 @@ public enum AID : uint
 
     KnowledgeLevel4HolyWide = 0xB8CE, // helper->self, range 25 180-degree cone
     KnowledgeLevel5Death = 0xB8CF, // helper->self, range 25 120-degree cone
+    KnowledgeLevel5DeathBook = 0xB8CC, // two-book round: the 5级 sector is cast with this page-side AID (47308) instead of B8CF
     KnowledgeLevel3Flare = 0xB8D0, // helper->self, range 25 120-degree cone
     KnowledgeLevel4Holy = 0xB8D1, // helper->self, range 25 120-degree cone
     PrimeKnowledgeLevelDeath = 0xB8D2, // helper->self, range 25 120-degree cone
@@ -51,6 +52,7 @@ public enum AID : uint
 
     KnowledgeLevel4HolyWideAlt = 0xC57C, // helper->self, duplicate of B8CE
     KnowledgeLevel5DeathAlt = 0xC57D, // helper->self, duplicate of B8CF
+    KnowledgeLevel5DeathBookAlt = 0xC57A, // two-book round: duplicate of B8CC (50554)
     KnowledgeLevel3FlareAlt = 0xC57E, // helper->self, duplicate of B8D0
     KnowledgeLevel4HolyAlt = 0xC57F, // helper->self, duplicate of B8D1
     PrimeKnowledgeLevelDeathAlt = 0xC580, // helper->self, duplicate of B8D2
@@ -72,9 +74,9 @@ sealed class BasicAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 {
     private static readonly AOEShapeCircle Blot = new(15f);
     private static readonly AOEShapeCircle SummonPages = new(4f);
-    // Initial cross writing: 13y-wide arms per the user's in-game observation (the action-sheet
-    // width of 10y read too narrow; 6.5 half-width is the conservative larger value).
-    private static readonly AOEShapeCross QuadRule = new(25f, 6.5f);
+    // Initial cross writing: 10y-wide arms (5 half-width) per user testing - the wider 6.5
+    // trial value was confirmed too large, so the action-sheet width is kept.
+    private static readonly AOEShapeCross QuadRule = new(25f, 5f);
     private static readonly AOEShapeCone FireII = new(60f, 22.5f.Degrees());
 
     // Blot exposes three rows of three circles at roughly two-second intervals. The opener is
@@ -192,10 +194,12 @@ sealed class ThunderII(BossModule module) : ReplayValidatedCastAOEs(module)
 // source -> LocXZ. The fixed 50-yalm length intentionally extends to the arena edge.
 sealed class HorizontalRule(BossModule module) : Components.GenericAOEs(module)
 {
-    // 7.5y-wide lanes (3.75 half-width) per replay hit analysis: five hit samples peak at 2.94y
-    // off-axis, which makes the action-sheet width of 12y improbable (~1.2% under uniform hits)
-    // and matches the user's 7.5y observation.
-    private static readonly AOEShapeRect Shape = new(50f, 3.75f);
+    // 6y-wide lanes (3 half-width): the grid requires the lanes to tile without overlap or gaps
+    // (batch step is 6y, so the lane width must be 6y too), and the replay hits peak at 2.94y
+    // off-axis (5y half-width is excluded by that sample). lengthBack=50 makes the lane span the
+    // whole arena both ways along its axis (vertical lanes north-south, horizontal east-west) -
+    // the default 0 left only the half toward the cast direction, showing short lanes.
+    private static readonly AOEShapeRect Shape = new(50f, 3f, 50f);
     private const double EventResolveTolerance = 0.5d;
     private const double ExpireDelay = 2d;
     private readonly List<AOEInstance> _pending = [with(16)];
@@ -235,11 +239,19 @@ sealed class HorizontalRule(BossModule module) : Components.GenericAOEs(module)
             return;
 
         // This component only serves the cursive-writing lanes, so a new batch fully replaces the
-        // previous one. Per-InstanceID removal was unsafe: the four helpers reuse instance IDs
-        // across batches (batch 1/3 and batch 2/4 share the same IDs), which could leave the old
-        // batch drawn alongside the new one (two rings at once) when a finish event was missed.
-        _pending.Clear();
+        // previous one. The four helpers of one batch cast at the same time (identical activation),
+        // so clear only when a new batch starts (~2s apart) - an unconditional clear would run once
+        // per helper callback and leave only the last lane of the batch (user-verified "1 lane").
+        // Per-InstanceID removal was unsafe too: the helpers reuse instance IDs across batches
+        // (batch 1/3 and batch 2/4 share the same IDs), leaving the old batch alongside the new one.
+        if (_pending.Count != 0 && Math.Abs((_pending[0].Activation - activation).TotalSeconds) > 0.5d)
+            _pending.Clear();
         var rotation = Angle.FromDirection(direction);
+        // The float coordinates (LocXZ vs caster position) skew the direction by a fraction of a
+        // degree; snap to the nearest cardinal so vertical lanes run exactly north-south and
+        // horizontal lanes exactly east-west (no pixel-level tilt).
+        var snapped = MathF.Round(rotation.Rad / (MathF.PI / 2f)) * (MathF.PI / 2f);
+        rotation = new Angle(snapped);
         _pending.Add(new(Shape, caster.Position, rotation, activation, actorID: caster.InstanceID, shapeDistance: Shape.Distance(caster.Position, rotation)));
         _pending.Sort((left, right) => left.Activation.CompareTo(right.Activation));
     }
@@ -247,7 +259,10 @@ sealed class HorizontalRule(BossModule module) : Components.GenericAOEs(module)
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
         if (spell.Action.ID == (uint)AID.HorizontalRule && (spell.EventHappened || Module.CastFinishAt(spell) <= WorldState.CurrentTime.AddSeconds(EventResolveTolerance)))
-            _pending.RemoveAll(aoe => aoe.ActorID == caster.InstanceID);
+            // Only the already-resolving entry may be removed: the four helpers reuse instance IDs
+            // across batches, so a late finish/effect event of the previous batch must not delete
+            // the freshly created next-batch entries (their activation is still in the future).
+            _pending.RemoveAll(aoe => aoe.ActorID == caster.InstanceID && aoe.Activation <= WorldState.CurrentTime.AddSeconds(EventResolveTolerance));
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
@@ -255,7 +270,8 @@ sealed class HorizontalRule(BossModule module) : Components.GenericAOEs(module)
         if (spell.Action.ID != (uint)AID.HorizontalRule || spell.GlobalSequence != 0 && !_seenGlobalSequences.Add(spell.GlobalSequence))
             return;
 
-        _pending.RemoveAll(aoe => aoe.ActorID == caster.InstanceID);
+        // Same instance-ID reuse guard as OnCastFinished.
+        _pending.RemoveAll(aoe => aoe.ActorID == caster.InstanceID && aoe.Activation <= WorldState.CurrentTime.AddSeconds(EventResolveTolerance));
         ++NumCasts;
     }
 
@@ -315,13 +331,7 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
             // direction; the page merely announces which rule the sector uses.
             var direction = sector.Rotation;
             if (!unknown && SatisfiesRule(level, sector.Kind))
-            {
-                // This sector is safe for this player: outline it green so the eye can see where to
-                // stand, without making it risky for automation.
-                _displayed.Add(new(sector.Shape, Module.Arena.Center, direction, sector.Activation,
-                    Colors.Safe, false, sector.Casters.FirstOrDefault(), sector.Shape.Distance(Module.Arena.Center, direction)));
-                continue;
-            }
+                continue; // safe sector: no zone drawn (the in-arena green guide was removed per user feedback)
 
             _displayed.Add(new(sector.Shape, Module.Arena.Center, direction, sector.Activation,
                 actorID: sector.Casters.FirstOrDefault(), shapeDistance: sector.Shape.Distance(Module.Arena.Center, direction)));
@@ -396,6 +406,10 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
         (uint)AID.KnowledgeLevel4Holy or (uint)AID.KnowledgeLevel4HolyAlt => new(SectorKind.Level4, Sector120, OID.Pages8),
         (uint)AID.KnowledgeLevel4HolyWide or (uint)AID.KnowledgeLevel4HolyWideAlt => new(SectorKind.Level4Wide, Sector180, OID.Pages8),
         (uint)AID.KnowledgeLevel5Death or (uint)AID.KnowledgeLevel5DeathAlt => new(SectorKind.Level5, Sector120, OID.Pages64),
+        // The two-book rounds cast the 5级 sector with the page-side AIDs B8CC/50554 instead of
+        // B8CF/C57D, and each book covers a full 180-degree sector (not the 120 used by the
+        // three-book rounds); without these mappings that round showed no sector at all.
+        (uint)AID.KnowledgeLevel5DeathBook or (uint)AID.KnowledgeLevel5DeathBookAlt => new(SectorKind.Level5, Sector180, OID.Pages64),
         (uint)AID.PrimeKnowledgeLevelDeath or (uint)AID.PrimeKnowledgeLevelDeathAlt => new(SectorKind.Prime, Sector120, OID.Pages512),
         (uint)AID.PrimeKnowledgeLevelDeathWide or (uint)AID.PrimeKnowledgeLevelDeathWideAlt => new(SectorKind.PrimeWide, Sector180, OID.Pages512),
         _ => null
