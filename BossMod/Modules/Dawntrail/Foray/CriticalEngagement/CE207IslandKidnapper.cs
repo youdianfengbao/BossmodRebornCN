@@ -464,10 +464,27 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
     private const float LethalRadius = 24.5f;
     private const float PreferredStartDistance = 20.5f;
     private const float PreferredStartRadius = 2f;
+    // Landing on a hurricane is lethal: the storm body is a 4.5y contact AOE, add the player
+    // half-width and a small margin -> 6y danger radius around each storm's predicted position.
+    private const float HurricaneLandingRadius = 6f;
     // Replay event timing is consistently about 0.60s after the helper cast finishes. Using the
     // old 1.05s estimate scheduled the safe-edge constraint roughly 0.4s after the real knockback.
     private const double HitDelay = 0.60d;
     private readonly List<Knockback> _casters = [with(2)];
+
+    // Each hurricane's position at the given time, extrapolated from its measured circular motion.
+    private IEnumerable<WPos> HurricanePositionsAt(DateTime time)
+    {
+        var hazards = Module.FindComponent<HurricaneHazards>();
+        if (hazards == null)
+            yield break;
+        foreach (var hurricane in Module.Enemies((uint)OID.Hurricane))
+        {
+            if (hurricane.IsDeadOrDestroyed || !hazards.TryGetMotion(hurricane.InstanceID, out var motion))
+                continue; // unknown motion: skip rather than misjudge
+            yield return motion.Predict(Arena.Center, time);
+        }
+    }
 
     public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor)
     {
@@ -484,6 +501,10 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
             hints.AddForbiddenZone(new SDKnockbackInCircleFixedDirection(center, displacement, SafeRadius), kb.Activation);
             var preferredStart = center - PreferredStartDistance * kb.Direction.ToDirection();
             hints.GoalZones.Add(position => position.InCircle(preferredStart, PreferredStartRadius) ? 5f : 0f);
+            // Landings on a hurricane are lethal too: forbid each storm's predicted position at
+            // the knockback time so the AI plans around it (unknown motion is skipped).
+            foreach (var stormPos in HurricanePositionsAt(kb.Activation))
+                hints.AddForbiddenZone(new SDCircle(stormPos, HurricaneLandingRadius), kb.Activation);
         }
     }
 
@@ -498,7 +519,18 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
             hints.Add("主坦克站在中场——阵风会把全队推出边界！");
     }
 
-    public override bool DestinationUnsafe(int slot, Actor actor, WPos pos) => !pos.InCircle(Arena.Center, LethalRadius);
+    public override bool DestinationUnsafe(int slot, Actor actor, WPos pos)
+    {
+        if (!pos.InCircle(Arena.Center, LethalRadius))
+            return true;
+        // landing on a hurricane is lethal: reject any candidate inside a storm's predicted
+        // position at the knockback time (unknown motion is skipped)
+        foreach (var kb in _casters)
+            foreach (var stormPos in HurricanePositionsAt(kb.Activation))
+                if (pos.InCircle(stormPos, HurricaneLandingRadius))
+                    return true;
+        return false;
+    }
 
     public override void Update() => PruneExpired();
 

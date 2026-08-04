@@ -72,7 +72,9 @@ sealed class BasicAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 {
     private static readonly AOEShapeCircle Blot = new(15f);
     private static readonly AOEShapeCircle SummonPages = new(4f);
-    private static readonly AOEShapeCross QuadRule = new(25f, 5f);
+    // Initial cross writing: 13y-wide arms per the user's in-game observation (the action-sheet
+    // width of 10y read too narrow; 6.5 half-width is the conservative larger value).
+    private static readonly AOEShapeCross QuadRule = new(25f, 6.5f);
     private static readonly AOEShapeCone FireII = new(60f, 22.5f.Degrees());
 
     // Blot exposes three rows of three circles at roughly two-second intervals. The opener is
@@ -190,7 +192,10 @@ sealed class ThunderII(BossModule module) : ReplayValidatedCastAOEs(module)
 // source -> LocXZ. The fixed 50-yalm length intentionally extends to the arena edge.
 sealed class HorizontalRule(BossModule module) : Components.GenericAOEs(module)
 {
-    private static readonly AOEShapeRect Shape = new(50f, 6f);
+    // 7.5y-wide lanes (3.75 half-width) per replay hit analysis: five hit samples peak at 2.94y
+    // off-axis, which makes the action-sheet width of 12y improbable (~1.2% under uniform hits)
+    // and matches the user's 7.5y observation.
+    private static readonly AOEShapeRect Shape = new(50f, 3.75f);
     private const double EventResolveTolerance = 0.5d;
     private const double ExpireDelay = 2d;
     private readonly List<AOEInstance> _pending = [with(16)];
@@ -229,7 +234,11 @@ sealed class HorizontalRule(BossModule module) : Components.GenericAOEs(module)
         if (activation <= WorldState.CurrentTime || direction.LengthSq() < 0.01f)
             return;
 
-        _pending.RemoveAll(aoe => aoe.ActorID == caster.InstanceID);
+        // This component only serves the cursive-writing lanes, so a new batch fully replaces the
+        // previous one. Per-InstanceID removal was unsafe: the four helpers reuse instance IDs
+        // across batches (batch 1/3 and batch 2/4 share the same IDs), which could leave the old
+        // batch drawn alongside the new one (two rings at once) when a finish event was missed.
+        _pending.Clear();
         var rotation = Angle.FromDirection(direction);
         _pending.Add(new(Shape, caster.Position, rotation, activation, actorID: caster.InstanceID, shapeDistance: Shape.Distance(caster.Position, rotation)));
         _pending.Sort((left, right) => left.Activation.CompareTo(right.Activation));
