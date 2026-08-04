@@ -83,6 +83,14 @@ sealed class ElectricBoundary(BossModule module) : Components.GenericAOEs(module
     private readonly AOEInstance[] aoe = [new(Shape, module.Arena.Center)];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => aoe;
+
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    {
+        // The 18-25 donut is mostly clipped by the r20 arena; draw a visible yellow 19-20 band
+        // plus the fence outline so the kill ring reads clearly.
+        Arena.ZoneDonut(Arena.Center, 19f, 20f, Colors.Danger);
+        Arena.ZoneCircleOutlineUnclipped(Arena.Center, 20f, Colors.Danger, 3f);
+    }
 }
 
 sealed class TinyQuake(BossModule module) : ReplayValidatedCastAOEs(module) {

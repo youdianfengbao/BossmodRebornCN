@@ -42,6 +42,14 @@ sealed class LethalBoundary(BossModule module) : Components.GenericAOEs(module)
     private readonly AOEInstance[] _aoe = [new(Shape, module.Arena.Center)];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
+
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    {
+        // The 19.5-30 donut is clipped by the r20 arena into an invisible sliver; draw a visible
+        // yellow 19-20 band plus the fence outline so the kill ring reads clearly.
+        Arena.ZoneDonut(Arena.Center, 19f, 20f, Colors.Danger);
+        Arena.ZoneCircleOutlineUnclipped(Arena.Center, 20f, Colors.Danger, 3f);
+    }
 }
 
 // The spider web: the boss casts C4C1 on a daughter, then the link propagates daughter to

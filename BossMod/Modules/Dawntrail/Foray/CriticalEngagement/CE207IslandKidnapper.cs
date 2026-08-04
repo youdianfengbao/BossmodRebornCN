@@ -111,6 +111,11 @@ sealed class WindBoundary(BossModule module) : Components.GenericAOEs(module)
         if (_galeActive && WorldState.CurrentTime > _galeUntil)
             _galeActive = false;
     }
+
+    // Upstream 7.5.5.22 addition absorbed: draw the kill-ring outline so the electric fence reads
+    // clearly on the radar; independent of the GaleBlade gap logic above.
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+        => Arena.ZoneCircleOutlineUnclipped(Arena.Center, 23.5f, Colors.Danger, 2f);
 }
 
 sealed class KidnapperAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
