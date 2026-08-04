@@ -91,27 +91,42 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
 // (InspiritedHurricaneVisual, ~4.0s), then EIGHT 0x4BDA blades spawn on the cardinal/diagonal
 // cross and rotate clockwise around the boss (= arena center) at ~11.5°/s, sweeping the whole
 // arena on orbit rings ~r10/18/26; the pattern resolves when 47532/47534 (InspiritedCyclone
-// visual + circle) land. The only safe pocket for the whole rotation is the r<8 zone under the
-// boss. Show a green circle there while any blade is alive and drive the AI into it with a
-// high-weight goal (above UnbowedSpirit's 10 and BladePatterns' 20, so the AI actually heads
-// into the pocket instead of just keeping its distance). Blade presence is the trigger/end
-// signal - no event-window state machine to miss or leak.
+// visual + circle) land. The safe pocket for the whole rotation is the r<6 zone under the boss
+// (2026-08-03 user test: shrunk from r8 - the 8y circle over-covered the pocket and misled the
+// pilot, while r4 was too small; r6 is the compromise). Show a green circle once the 47536 cast
+// starts while blades are alive, and drive the
+// AI into it with a high-weight goal (above UnbowedSpirit's 10 and BladePatterns' 20, so the AI
+// actually heads into the pocket instead of just keeping its distance). 47530
+// (UnbowedSpiritVisual) also spawns 0x4BDA blades but without a center pocket - it must NOT show
+// the zone, so the trigger is the 47536 cast start gated on blades being alive. The flag clears
+// when the boss starts reading 47532 (InspiritedCycloneVisual - the pattern-resolution signal),
+// dropping the zone immediately even if blades are still alive.
 sealed class BladeDodgeZone(BossModule module) : BossComponent(module)
 {
-    private const float SafeRadius = 8f; // boss's feet: safe for the whole rotation (replay)
+    private const float SafeRadius = 6f; // boss's feet: safe for the whole rotation (2026-08-03 user test: 8y over-covered, 4y too small, 6y compromise)
     private const float GoalWeight = 30f; // beats the other CE201 goal weights
+
+    private bool _hurricaneActive; // set by 47536 cast start, cleared by 47532 cast start; the 47530 blade wave must NOT show the zone
 
     private bool BladesActive => Module.Enemies((uint)OID.AlabasterBlade).Any(blade => !blade.IsDeadOrDestroyed);
 
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.InspiritedHurricaneVisual)
+            _hurricaneActive = true;
+        else if (spell.Action.ID == (uint)AID.InspiritedCycloneVisual)
+            _hurricaneActive = false; // boss reads 47532 = pattern resolution signal; drop the zone immediately even if blades are still alive
+    }
+
     public override void DrawArenaBackground(int pcSlot, Actor pc)
     {
-        if (BladesActive)
+        if (_hurricaneActive && BladesActive)
             Arena.ZoneCircleOutline(Arena.Center, SafeRadius, Colors.Safe);
     }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (BladesActive)
+        if (_hurricaneActive && BladesActive)
             hints.GoalZones.Add(AIHints.GoalSingleTarget(Arena.Center, SafeRadius, GoalWeight));
     }
 }

@@ -56,7 +56,7 @@ sealed class ToxinPools(BossModule module) : Components.GenericAOEs(module)
     // The green puddle spawns small and expands to ~7.5y over roughly nine seconds (replay tick
     // distances grow from ~2.5y to ~7.5y), but the persistent hazard is drawn at its final
     // maximum diameter immediately instead of growing per-frame.
-    private const float MaxRadius = 7.5f;
+    private const float MaxRadius = 8.1f;
     private const float PositionTolerance = 0.75f;
     private const double PredictedLifetime = 10.5d;
     private const double TickLifetime = 1.25d;
