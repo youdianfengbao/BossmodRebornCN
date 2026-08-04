@@ -293,7 +293,7 @@ sealed class DebugGraphics
             return;
         }
 
-        ImGui.TableSetupColumn("Name");
+        ImGui.TableSetupColumn("名称");
         ImGui.TableSetupColumn("Value");
         ImGui.TableHeadersRow();
 
@@ -415,7 +415,7 @@ sealed class DebugGraphics
             return;
         }
 
-        ImGui.Checkbox("Circle", ref _overlayCircle);
+        ImGui.Checkbox("圆形", ref _overlayCircle);
         ImGui.DragFloat2("Center", ref _overlayCenter);
         ImGui.SameLine();
         // We can place the grid at players feet as long as we check player is not null

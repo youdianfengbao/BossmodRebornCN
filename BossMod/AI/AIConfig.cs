@@ -1,58 +1,58 @@
 ﻿namespace BossMod.AI;
 
-[ConfigDisplay(Name = "Automovement", Order = 7)]
+[ConfigDisplay(Name = "AI 配置 (AI 处于非常实验阶段，请自行承担风险！)", Order = 7)]
 sealed class AIConfig : ConfigNode
 {
-    [PropertyDisplay("Show status in DTR bar")]
+    [PropertyDisplay("在 DTR 条中显示状态")]
     public bool ShowDTR = false;
 
-    [PropertyDisplay("Show AI interface")]
+    [PropertyDisplay("显示 AI 界面")]
     public bool DrawUI = false;
 
-    [PropertyDisplay("Focus target master")]
+    [PropertyDisplay("将目标领袖设为焦点")]
     public bool FocusTargetMaster = false;
 
-    [PropertyDisplay("Broadcast keypresses to other windows", tooltip: "Can cause hitching on some computers. Only enable it if it is actually needed! It is only useful for multiboxers.")]
+    [PropertyDisplay("将按键广播到其他窗口", tooltip: "在某些电脑上可能导致卡顿。仅在确实需要时启用！此功能只对多开玩家有用。")]
     public bool BroadcastToSlaves = false;
 
-    [PropertyDisplay("Follow party slot")]
+    [PropertyDisplay("跟随小队位置")]
     public int FollowSlot = 0;
 
-    [PropertyDisplay("Forbid actions")]
+    [PropertyDisplay("禁止动作")]
     public bool ForbidActions = false;
 
-    [PropertyDisplay("Manual targeting")]
+    [PropertyDisplay("手动目标选择")]
     public bool ManualTarget = false;
 
-    [PropertyDisplay("Forbid movement")]
+    [PropertyDisplay("禁止移动")]
     public bool ForbidMovement = false;
 
-    [PropertyDisplay("Follow during combat")]
+    [PropertyDisplay("战斗中跟随")]
     public bool FollowDuringCombat = true;
 
-    [PropertyDisplay("Follow during active boss module")]
+    [PropertyDisplay("在主动 Boss 模块期间跟随")]
     public bool FollowDuringActiveBossModule = true;
 
-    [PropertyDisplay("Follow out of combat")]
+    [PropertyDisplay("战斗外跟随")]
     public bool FollowOutOfCombat = false;
 
-    [PropertyDisplay("Follow target")]
+    [PropertyDisplay("跟随目标")]
     public bool FollowTarget = true;
 
-    [PropertyDisplay("Desired positional when following target")]
+    [PropertyDisplay("跟随目标时期望位置(任意/侧面/背面/正面)")]
     [PropertyCombo(["Any", "Flank", "Rear", "Front"])]
     public Positional DesiredPositional = Positional.Any;
 
-    [PropertyDisplay("Max distance to slot")]
+    [PropertyDisplay("到插槽的最大距离")]
     public float MaxDistanceToSlot = 1f;
 
-    [PropertyDisplay("Max distance to target")]
+    [PropertyDisplay("到目标的最大距离")]
     public float MaxDistanceToTarget = 2.6f;
 
-    [PropertyDisplay("Minimum distance to hitbox")]
+    [PropertyDisplay("到碰撞箱的最小距离")]
     public float MinDistance = default;
 
-    [PropertyDisplay("Preferred distance to forbidden zones")]
+    [PropertyDisplay("到禁止区域的偏好距离")]
     public float PreferredDistance = default;
 
     [PropertyDisplay("Enable auto AFK", tooltip: "Enables auto AFK if out of combat. While AFK AI will not use autorotation or target anything")]
@@ -61,19 +61,19 @@ sealed class AIConfig : ConfigNode
     [PropertyDisplay("Auto AFK timer", tooltip: "Time in seconds out of combat until AFK mode enables. Any movement will reset timer or disable AFK mode if already active.")]
     public float AFKModeTimer = 10f;
 
-    [PropertyDisplay("Disable loading obstacle maps", tooltip: "Might be required to be enabled for some some content such as deep dungeons.")]
+    [PropertyDisplay("禁用障碍物地图加载", tooltip: "部分内容（如深层迷宫）可能需要启用此选项。")]
     public bool DisableObstacleMaps = false;
 
-    [PropertyDisplay("Movement decision delay", tooltip: "Only change this at your own risk and keep this value low! Too high and it won't move in time for some mechanics. Make sure to readjust the value for different content.")]
+    [PropertyDisplay("移动决策延迟", tooltip: "谨慎修改此值并保持较低数值！过高可能导致无法及时应对某些机制。请注意根据不同内容调整此值。")]
     public double MoveDelay = default;
 
-    [PropertyDisplay("Idle while mounted")]
+    [PropertyDisplay("骑乘时保持静止")]
     public bool ForbidAIMovementMounted = false;
 
-    [PropertyDisplay("Echo slash commands to chat")]
+    [PropertyDisplay("将斜杠命令回显到聊天")]
     public bool EchoToChat = true;
 
-    [PropertyDisplay("Follow RotationSolverReborn's desired positional", tooltip: "When enabled, Automovement will use the positional currently requested by RotationSolverReborn over IPC")]
+    [PropertyDisplay("跟随 RotationSolverReborn 请求的身位", tooltip: "启用后，自动移动会通过 IPC 使用 RotationSolverReborn 当前请求的身位")]
     public bool FollowRSRDesiredPositional = true;
 
     public string? AIAutorotPresetName;

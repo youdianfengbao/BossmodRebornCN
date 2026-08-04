@@ -48,7 +48,7 @@ public abstract class GenericStackSpread(BossModule module, bool raidwideOnResol
     public int ExtraAISpreadThreshold = 1;
     public readonly List<Stack> Stacks = [];
     public List<Spread> Spreads = [];
-    public const string StackHint = "Stack!";
+    public const string StackHint = "分摊！";
 
     public bool Active => Stacks.Count + Spreads.Count > 0;
     public List<Stack> ActiveStacks
@@ -159,7 +159,7 @@ public abstract class GenericStackSpread(BossModule module, bool raidwideOnResol
                         break;
                     }
                 }
-                hints.Add("Spread!", inDanger);
+                hints.Add("分散！", inDanger);
                 goto done;
             }
         }
@@ -837,7 +837,7 @@ UniformStackSpread(module, innerRadius / 3f, default, minStackSize, maxStackSize
 public abstract class GenericBaitStack(BossModule module, uint aid = default, bool onlyShowOutlines = false) : GenericBaitAway(module, aid)
 {
     // TODO: add logic for min and max stack size
-    public const string HintStack = "Stack!";
+    public const string HintStack = "分摊！";
     public const string HintAvoidOther = "GTFO from other stacks!";
     public const string HintAvoid = "GTFO from stack!";
 

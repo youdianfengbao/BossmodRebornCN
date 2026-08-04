@@ -19,7 +19,7 @@ public sealed class BRD(RotationModuleManager manager, Actor player) : Attackxan
 
     public static RotationModuleDefinition Definition()
     {
-        return new RotationModuleDefinition("xan BRD", "Bard", "Standard rotation (xan)|Ranged", "xan", RotationModuleQuality.Basic, BitMask.Build(Class.ARC, Class.BRD), 100).WithStrategies<Strategy>();
+        return new RotationModuleDefinition("xan BRD", "Bard", "标准循环 (xan)|远敏", "xan", RotationModuleQuality.Basic, BitMask.Build(Class.ARC, Class.BRD), 100).WithStrategies<Strategy>();
     }
 
     public enum Song : byte

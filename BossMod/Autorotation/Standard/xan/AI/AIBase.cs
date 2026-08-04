@@ -24,7 +24,7 @@ public abstract class AIBase<TValues>(RotationModuleManager manager, Actor playe
 
 public enum HintedStrategy
 {
-    [Option("Don't use")]
+    [Option("不要使用")]
     Disabled,
     [Option("Use if the current module suggests it")]
     HintOnly,

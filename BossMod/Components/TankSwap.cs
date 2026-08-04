@@ -40,7 +40,7 @@ public class TankSwap(BossModule module, uint bossCast, uint firstCast, uint sub
     {
         if (_source?.TargetID == _prevTarget && actor.Role == Role.Tank)
         {
-            hints.Add(_prevTarget != actor.InstanceID ? "Provoke!" : "Pass aggro!");
+            hints.Add(_prevTarget != actor.InstanceID ? "Provoke!" : "传递仇恨！");
         }
         base.AddHints(slot, actor, hints);
     }

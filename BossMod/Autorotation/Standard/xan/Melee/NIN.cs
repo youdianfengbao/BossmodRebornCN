@@ -30,7 +30,7 @@ public sealed class NIN(RotationModuleManager manager, Actor player) : Attackxan
 
     public static RotationModuleDefinition Definition()
     {
-        return new RotationModuleDefinition("xan NIN", "Ninja", "Standard rotation (xan)|Melee", "xan", RotationModuleQuality.Basic, BitMask.Build(Class.ROG, Class.NIN), 100).WithStrategies<Strategy>();
+        return new RotationModuleDefinition("xan NIN", "Ninja", "标准循环 (xan)|近战", "xan", RotationModuleQuality.Basic, BitMask.Build(Class.ROG, Class.NIN), 100).WithStrategies<Strategy>();
     }
 
     public int Ninki;

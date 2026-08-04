@@ -6,12 +6,12 @@ using Dalamud.Interface.Utility.Raii;
 
 namespace BossMod;
 
-[ConfigDisplay(Name = "Party roles assignment", Order = 2)]
+[ConfigDisplay(Name = "队伍位置分配", Order = 2)]
 public class PartyRolesConfig : ConfigNode
 {
     public enum Assignment { MT, OT, H1, H2, M1, M2, R1, R2, Unassigned }
 
-    [PropertyDisplay("Automatically assign roles on zone change")]
+    [PropertyDisplay("进入副本时自动分配位置")]
     public bool AutoAssignOnDutyEnter = false;
 
     [PropertyDisplay("Preferred auto-assigned role", tooltip: "Only applied when auto-assigning roles (via the 'Auto-Assign Roles' button or on zone change when that option is enabled). Biases the player toward the chosen slot when their job matches the role; otherwise it falls back to the default logic.")]
@@ -384,18 +384,18 @@ public class PartyRolesConfig : ConfigNode
 
     public override void DrawCustom(UITree tree, WorldState ws)
     {
-        if (ImGui.Button("Auto-Assign Roles"))
+        if (ImGui.Button("自动分配位置"))
         {
             AutoAssignRoles(ws.Party);
         }
         ImGui.SameLine();
-        ImGui.TextUnformatted("Click to automatically assign party roles based on job and party order");
+        ImGui.TextUnformatted("根据职业和小队顺序自动分配队伍位置");
 
-        foreach (var _ in tree.Node("Tank auto-assign priority (drag to reorder, highest to lowest)"))
+        foreach (var _ in tree.Node("坦克自动分配优先级（拖动排序，由高到低）"))
         {
-            ImGui.TextColored(ImGuiColors.TankBlue, "Main Tank:");
+            ImGui.TextColored(ImGuiColors.TankBlue, "主坦:");
             DrawTankPriority("mt", MainTankPriority);
-            ImGui.TextColored(ImGuiColors.TankBlue, "Off Tank:");
+            ImGui.TextColored(ImGuiColors.TankBlue, "副坦:");
             DrawTankPriority("ot", OffTankPriority);
         }
 
@@ -408,7 +408,7 @@ public class PartyRolesConfig : ConfigNode
                     ImGui.TableSetupColumn(r.ToString(), ImGuiTableColumnFlags.None, 25);
                 }
 
-                ImGui.TableSetupColumn("Name");
+                ImGui.TableSetupColumn("名称");
                 ImGui.TableHeadersRow();
 
                 List<(ulong cid, string name, char role, Assignment assignment)> party = [];
@@ -451,12 +451,12 @@ public class PartyRolesConfig : ConfigNode
         if (AssignmentsPerSlot(ws.Party).Length == 0)
         {
             using var color = ImRaii.PushColor(ImGuiCol.Text, Colors.TextColor2);
-            ImGui.TextUnformatted("Invalid assignments: there should be exactly one raid member per role");
+            ImGui.TextUnformatted("分配无效：每个位置应且只能有一名队员。");
         }
         else
         {
             using var color = ImRaii.PushColor(ImGuiCol.Text, Colors.TextColor4);
-            ImGui.TextUnformatted("All good!");
+            ImGui.TextUnformatted("分配有效！");
         }
     }
 }

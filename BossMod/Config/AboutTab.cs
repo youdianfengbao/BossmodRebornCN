@@ -18,74 +18,74 @@ public sealed class AboutTab(DirectoryInfo? replayDir)
     {
         using var wrap = ImRaii.TextWrapPos(0);
 
-        ImGui.TextUnformatted("BossModReborn (BMR) provides boss fight radar, auto-rotation, cooldown planning, and AI. All of its modules can be toggled individually. Support for it can be found in the Discord server linked at the bottom of this tab.");
-        ImGui.TextUnformatted("This is a FORK of the original BossMod (VBM). Only ask for support on the Combat Reborn Discord.");
-        ImGui.TextUnformatted("Please also make sure to not load VBM and this fork at the same time. The consequences of doing that are unexplored and unsupported.");
+        ImGui.TextUnformatted("BossModReborn（BMR）提供首领战雷达、自动循环、冷却规划及AI功能。所有模块均可单独开关。技术支持请通过本页底部Discord链接获取。");
+        ImGui.TextUnformatted("此为原版BossMod（VBM）的分支版本，技术支持仅在Combat Reborn Discord提供。");
+        ImGui.TextUnformatted("请勿同时加载VBM与本分支版本，可能导致的后果未经测试且不受支持。");
         ImGui.Spacing();
-        DrawSection("Radar",
+        DrawSection("雷达功能",
         [
-            "Provides an on-screen window that contains an area mini-map showing player positions, boss position(s), various imminent AOEs, and other mechanics.",
-            "Useful because you don't have to remember what ability names mean.",
-            "See exactly whether you're getting clipped by incoming AOEs or not.",
+            "提供包含区域小地图的屏幕窗口，实时显示玩家位置、首领位置、即将触发的范围攻击及其他机制。",
+            "无需记忆技能名称即可直观理解机制。",
+            "清晰判断自身是否处于范围攻击覆盖区域。",
             "Enabled for supported bosses, visible in the \"Supported bosses\" tab.",
         ]);
         ImGui.Spacing();
-        DrawSection("Autorotation",
+        DrawSection("自动循环",
         [
-            "Executes fully optimal rotations to the best of its ability.",
+            "尽最大可能执行最优技能循环。",
             "Go to the \"Autorotation presets\" tab to create a preset.",
-            "Maturity of each rotation module is present in a tooltip.",
-            "Guide for using this feature can be found on the wiki.",
+            "各职业模块的完成度可通过工具提示查看。",
+            "使用指南详见项目Wiki。",
         ]);
         ImGui.Spacing();
-        DrawSection("Cooldown planner",
+        DrawSection("冷却规划",
         [
-            "Creates a CD plan for supported bosses.",
-            "Replaces autorotations in specific fights.",
-            "Allows you to time specific abilities to cast at specific times.",
-            "Guide for using this feature can be found on the wiki.",
+            "为特定首领战创建冷却技能使用计划。",
+            "在特定战斗中替代自动循环功能。",
+            "允许精确安排特定技能的使用时机。",
+            "使用指南详见项目Wiki。",
         ]);
         ImGui.Spacing();
-        DrawSection("AI",
+        DrawSection("AI系统",
         [
-            "Automates movement during boss fights.",
-            "Automatically moves your character based on safe zones determined by a boss's module, visible on the radar.",
-            "Should not be used in when playing with unknown players.",
-            "Can be hooked by other plugins to automate entire duties.",
+            "自动化首领战中的移动操作。",
+            "根据雷达显示的安全区域自动调整角色位置。",
+            "不建议在野队环境中使用。",
+            "可被其他插件调用以实现全副本自动化。",
         ]);
         ImGui.Spacing();
-        DrawSection("Replays",
+        DrawSection("战斗回放",
         [
-            "Useful for creating boss modules, analyzing problems with them, and making CD plans.",
-            "When asking for help, make sure to provide a replay! Please note that replays will contain your player name!",
-            "Enabled in Settings > Show replay management UI (or enable auto recording).",
-            $"Files are located in '{replayDir}'.",
+            "用于模块开发、问题分析及冷却规划。",
+            "提交问题报告时请务必提供回放文件（注意包含玩家ID信息）。",
+            "启用路径：设置 > 显示回放管理界面（或启用自动录制）。",
+            $"文件存储路径：'{replayDir}'。",
         ]);
         ImGui.Spacing();
         ImGui.Spacing();
 
         using (ImRaii.PushColor(ImGuiCol.Button, DiscordColor.ABGR))
         {
-            if (ImGui.Button("Combat Reborn Discord", new(220, 0)))
+            if (ImGui.Button("加入Combat Reborn Discord", new(220, 0)))
             {
                 _lastErrorMessage = OpenLink("https://discord.gg/p54TZMPnC9");
             }
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("BossModReborn GitHub", new(220, 0)))
+        if (ImGui.Button("访问BossModReborn GitHub", new(220, 0)))
         {
             _lastErrorMessage = OpenLink("https://github.com/FFXIV-CombatReborn/BossmodReborn");
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("BossMod Wiki", new(130, 0)))
+        if (ImGui.Button("查看BossMod Wiki", new(130, 0)))
         {
             _lastErrorMessage = OpenLink("https://github.com/awgil/ffxiv_bossmod/wiki");
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Open replay folder", new(180, 0)) && replayDir != null)
+        if (ImGui.Button("打开回放文件夹", new(180, 0)) && replayDir != null)
         {
             _lastErrorMessage = OpenDirectory(replayDir);
         }
@@ -135,7 +135,7 @@ public sealed class AboutTab(DirectoryInfo? replayDir)
         catch (Exception e)
         {
             Service.Log($"Error opening link {link}: {e}");
-            return $"Failed to open link '{link}', open it manually in the browser.";
+            return $"链接'{link}'打开失败，请手动在浏览器中访问。";
         }
     }
 
@@ -143,7 +143,7 @@ public sealed class AboutTab(DirectoryInfo? replayDir)
     {
         if (!dir.Exists)
         {
-            return $"Directory '{dir}' not found.";
+            return $"目录'{dir}'不存在";
         }
 
         try
@@ -154,7 +154,7 @@ public sealed class AboutTab(DirectoryInfo? replayDir)
         catch (Exception e)
         {
             Service.Log($"Error opening directory {dir}: {e}");
-            return $"Failed to open folder '{dir}', open it manually.";
+            return $"文件夹'{dir}'打开失败，请手动访问。";
         }
     }
 }

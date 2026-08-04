@@ -18,7 +18,7 @@ public sealed class ColumnActorStatuses : Timeline.ColumnGroup
     public ColumnActorStatuses(Timeline timeline, StateMachineTree tree, List<int> phaseBranches, Replay replay, Replay.Encounter enc, Replay.Participant actor)
         : base(timeline)
     {
-        //Name = "Statuses";
+        //Name = "状态";
         _tree = tree;
         _phaseBranches = phaseBranches;
         _replay = replay;

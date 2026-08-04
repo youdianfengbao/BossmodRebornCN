@@ -34,7 +34,7 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
     public BitMask ForbiddenPlayers; // these players should avoid baiting
     public List<Bait> CurrentBaits = [];
     public AIHints.PredictedDamageType DamageType = damageType;
-    public const string BaitAwayHint = "Bait away from raid!";
+    public const string BaitAwayHint = "远离队伍诱导！";
 
     public List<Bait> ActiveBaits
     {
@@ -197,7 +197,7 @@ public class GenericBaitAway(BossModule module, uint aid = default, bool alwaysD
 
                 if (IsClippedBy(actor, ref bait))
                 {
-                    hints.Add("GTFO from baited aoe!");
+                    hints.Add("离开诱导 AOE！");
                     break;
                 }
             }
@@ -709,7 +709,7 @@ public class GenericBaitProximity(BossModule module, bool alwaysDrawOtherBaits =
     public bool IgnoreOtherBaits; // if true, don't show hints/aoes for baits by others
     public PlayerPriority BaiterPriority = PlayerPriority.Interesting;
     public List<Bait> CurrentBaits = [];
-    public const string BaitAwayHint = "Bait away from raid!";
+    public const string BaitAwayHint = "远离队伍诱导！";
     public const string BaitAOEHint = "GTFO from baited AOE!";
 
     public List<Bait> ActiveBaits

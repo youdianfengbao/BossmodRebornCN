@@ -646,7 +646,7 @@ static class Extendxan
 
     public static RotationModuleDefinition DefineSharedTA(this RotationModuleDefinition def)
     {
-        def.Define(SharedTrack.Targeting).As<Targeting>("Targeting", uiPriority: 500, renderer: typeof(TargetingRenderer))
+        def.Define(SharedTrack.Targeting).As<Targeting>("目标选择", uiPriority: 500, renderer: typeof(TargetingRenderer))
             .AddOption(xan.Targeting.Manual, "Use player's current target for all actions")
             .AddOption(xan.Targeting.Auto, "Automatically select best target (highest number of nearby targets) for AOE actions")
             .AddOption(xan.Targeting.AutoPrimary, "Automatically select best target for AOE actions - ensure player target is hit")
@@ -665,8 +665,8 @@ static class Extendxan
     {
         return def.Define(track).As<OffensiveStrategy>(name, displayName, uiPriority: uiPriority, renderer: renderer ?? typeof(OffensiveStrategyRenderer))
             .AddOption(OffensiveStrategy.Automatic, "Use when optimal", minLevel: minLevel)
-            .AddOption(OffensiveStrategy.Delay, "Don't use", minLevel: minLevel)
-            .AddOption(OffensiveStrategy.Force, "Use ASAP", minLevel: minLevel);
+            .AddOption(OffensiveStrategy.Delay, "不要使用", minLevel: minLevel)
+            .AddOption(OffensiveStrategy.Force, "尽快使用", minLevel: minLevel);
     }
 
     public static AOEStrategy AOE(this StrategyValues strategy) => strategy.Option(SharedTrack.AOE).As<AOEStrategy>();

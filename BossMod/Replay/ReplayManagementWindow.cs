@@ -402,7 +402,7 @@ public sealed class ReplayManagementWindow : UIWindow
             prefix ??= Service.LuminaRow<TerritoryType>(_ws.CurrentZone)?.PlaceName.ValueNullable?.NameNoArticle.ToString();
         }
 
-        prefix ??= "World";
+        prefix ??= "世界";
         prefix = Utils.StringToIdentifier(prefix);
 
         var player = _ws.Party.Player();

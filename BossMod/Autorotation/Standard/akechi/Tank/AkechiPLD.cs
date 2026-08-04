@@ -18,13 +18,13 @@ public sealed class AkechiPLD(RotationModuleManager manager, Actor player) : Ake
 
     public static RotationModuleDefinition Definition()
     {
-        var res = new RotationModuleDefinition("Akechi PLD", "Standard Rotation Module", "Standard rotation (Akechi)|Tank", "Akechi", RotationModuleQuality.Good, BitMask.Build((int)Class.GLA, (int)Class.PLD), 100);
+        var res = new RotationModuleDefinition("Akechi PLD", "标准循环模块", "标准循环 (Akechi)|坦克", "Akechi", RotationModuleQuality.Good, BitMask.Build((int)Class.GLA, (int)Class.PLD), 100);
 
         res.DefineTargeting();
         res.DefineHold();
         res.DefinePotion(ActionDefinitions.IDPotionStr);
 
-        res.Define(Track.AOE).As<AOEStrategy>("ST/AOE", "Single-Target & AoE Rotations", 300)
+        res.Define(Track.AOE).As<AOEStrategy>("ST/AOE", "单体与 AOE 循环", 300)
             .AddOption(AOEStrategy.AutoFinish, "Automatically select best rotation based on targets nearby - finishes current combo if possible")
             .AddOption(AOEStrategy.ForceSTFinish, "Force Single-Target rotation, regardless of targets nearby - finishes current combo if possible")
             .AddOption(AOEStrategy.ForceAOEFinish, "Force AoE rotation, regardless of targets nearby - finishes current combo if possible")
@@ -87,17 +87,17 @@ public sealed class AkechiPLD(RotationModuleManager manager, Actor player) : Ake
             .AddOption(HolyStrategy.Delay, "Do not use any Holy actions", 0, 0, ActionTargets.None, 64)
             .AddAssociatedActions(AID.HolySpirit, AID.HolyCircle);
 
-        res.Define(Track.Dash).As<DashStrategy>("Dash", "Intervene", 95)
-            .AddOption(DashStrategy.Automatic, "Automatically use both Intervene charges when in burst - will only use if in melee range and not moving")
-            .AddOption(DashStrategy.GapClose, "Automatically use Intervene as gap closer if outside melee range", 30, 0, ActionTargets.Hostile, 66)
-            .AddOption(DashStrategy.GapClose5, "Automatically use Intervene as gap closer if further than five yalms", 30, 0, ActionTargets.Hostile, 66)
-            .AddOption(DashStrategy.GapClose10, "Automatically use Intervene as gap closer if further than ten yalms", 30, 0, ActionTargets.Hostile, 66)
-            .AddOption(DashStrategy.GapCloseOpener, "Automatically use Intervene as gap closer at the start of combat if out of melee range", 30, 0, ActionTargets.Hostile, 66)
-            .AddOption(DashStrategy.Opener, "Automatically use Intervene at the start of combat, regardless of range", 30, 0, ActionTargets.Hostile, 66)
-            .AddOption(DashStrategy.OvercapSafe, "Automatically use Intervene if close to overcapping on charges - will only use if in melee range and not moving", 30, 0, ActionTargets.Hostile, 66)
-            .AddOption(DashStrategy.OvercapUnsafe, "Automatically use Intervene if close to overcapping on charges, regardless of any conditions (UNSAFE)", 30, 0, ActionTargets.Hostile, 66)
-            .AddOption(DashStrategy.Force, "Force Intervene", 30, 0, ActionTargets.Hostile, 66)
-            .AddOption(DashStrategy.Delay, "Do not use Intervene", 0, 0, ActionTargets.None, 66)
+        res.Define(Track.Dash).As<DashStrategy>("冲刺", "Intervene", 95)
+            .AddOption(DashStrategy.Automatic, "爆发期自动使用两层调停；仅在近战距离内且未移动时使用")
+            .AddOption(DashStrategy.GapClose, "超出近战距离时自动将调停作为突进使用", 30, 0, ActionTargets.Hostile, 66)
+            .AddOption(DashStrategy.GapClose5, "距离超过 5 yalms 时自动将调停作为突进使用", 30, 0, ActionTargets.Hostile, 66)
+            .AddOption(DashStrategy.GapClose10, "距离超过 10 yalms 时自动将调停作为突进使用", 30, 0, ActionTargets.Hostile, 66)
+            .AddOption(DashStrategy.GapCloseOpener, "开战时若超出近战距离，自动将调停作为突进使用", 30, 0, ActionTargets.Hostile, 66)
+            .AddOption(DashStrategy.Opener, "开战时自动使用调停，无视距离", 30, 0, ActionTargets.Hostile, 66)
+            .AddOption(DashStrategy.OvercapSafe, "层数即将溢出时自动使用调停；仅在近战距离内且未移动时使用", 30, 0, ActionTargets.Hostile, 66)
+            .AddOption(DashStrategy.OvercapUnsafe, "层数即将溢出时自动使用调停，无视任何条件（危险）", 30, 0, ActionTargets.Hostile, 66)
+            .AddOption(DashStrategy.Force, "强制使用调停", 30, 0, ActionTargets.Hostile, 66)
+            .AddOption(DashStrategy.Delay, "不使用调停", 0, 0, ActionTargets.None, 66)
             .AddAssociatedActions(AID.Intervene);
 
         res.Define(Track.Ranged).As<RangedStrategy>("Ranged", "Ranged Options", 100)

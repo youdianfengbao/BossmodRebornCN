@@ -162,7 +162,7 @@ public class StateMachineBuilder(BossModule module)
     }
 
     // create a single-state phase; useful for modules with trivial state machines
-    public Phase TrivialPhase(uint seqID = default, float enrage = 10000f) => DeathPhase(seqID, id => SimpleState(id, enrage, "Enrage"));
+    public Phase TrivialPhase(uint seqID = default, float enrage = 10000f) => DeathPhase(seqID, id => SimpleState(id, enrage, "狂暴"));
 
     // create a simple state without any actions
     public State SimpleState(uint id, float duration, string name)

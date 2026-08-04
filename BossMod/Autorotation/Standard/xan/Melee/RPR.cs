@@ -55,7 +55,7 @@ public sealed class RPR(RotationModuleManager manager, Actor player) : Attackxan
     {
         [Option("Use on cooldown, unless it would overcap gauge", Targets = ActionTargets.Hostile)]
         Automatic,
-        [Option("Don't use")]
+        [Option("不要使用")]
         Delay,
         [Option("Use ASAP, even if it would overcap gauge", Targets = ActionTargets.Hostile)]
         Force
@@ -69,7 +69,7 @@ public sealed class RPR(RotationModuleManager manager, Actor player) : Attackxan
         ReserveGluttony,
         [Option("Use Stalk/Gluttony ASAP, ignoring timers", Targets = ActionTargets.Hostile, MinLevel = 76)]
         Force,
-        [Option("Do not use")]
+        [Option("不使用")]
         Delay
     }
 
@@ -85,7 +85,7 @@ public sealed class RPR(RotationModuleManager manager, Actor player) : Attackxan
     {
         [Option("Use out of melee range if Enhanced Harpe is active", Targets = ActionTargets.Hostile)]
         Automatic,
-        [Option("Don't use")]
+        [Option("不要使用")]
         Forbid,
         [Option("Always use when out of melee range", Targets = ActionTargets.Hostile)]
         Ranged,
@@ -97,13 +97,13 @@ public sealed class RPR(RotationModuleManager manager, Actor player) : Attackxan
         Automatic,
         [Option("Save for melee downtime", Targets = ActionTargets.Hostile)]
         Ranged,
-        [Option("Don't use")]
+        [Option("不要使用")]
         Delay,
     }
 
     public static RotationModuleDefinition Definition()
     {
-        return new RotationModuleDefinition("xan RPR", "Reaper", "Standard rotation (xan)|Melee", "xan", RotationModuleQuality.Basic, BitMask.Build(Class.RPR), 100).WithStrategies<Strategy>();
+        return new RotationModuleDefinition("xan RPR", "Reaper", "标准循环 (xan)|近战", "xan", RotationModuleQuality.Basic, BitMask.Build(Class.RPR), 100).WithStrategies<Strategy>();
     }
 
     public int RedGauge;

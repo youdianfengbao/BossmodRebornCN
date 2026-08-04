@@ -4,7 +4,7 @@ public sealed class MeleeAI(RotationModuleManager manager, Actor player) : AIBas
 {
     public struct Strategy
     {
-        [Track("Second Wind", InternalName = "Second Wind")]
+        [Track("内丹", InternalName = "内丹")]
         public Track<EnabledByDefault> SecondWind;
         public Track<EnabledByDefault> Bloodbath;
         public Track<EnabledByDefault> Stun;

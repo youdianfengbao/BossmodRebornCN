@@ -4,7 +4,7 @@ public sealed class BozjaAI(RotationModuleManager manager, Actor player) : AIBas
 {
     public struct Strategy
     {
-        [Track("Auto-dispel", InternalName = "Auto-dispel", Action = BozjaHolsterID.LostDispel)]
+        [Track("自动驱散", InternalName = "自动驱散", Action = BozjaHolsterID.LostDispel)]
         public Track<EnabledByDefault> Dispel;
     }
 

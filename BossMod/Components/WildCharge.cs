@@ -41,11 +41,11 @@ public class GenericWildCharge(BossModule module, float halfWidth, uint aid = de
 
                 if (inOtherCharge)
                 {
-                    hints.Add("GTFO from other charges!");
+                    hints.Add("离开其他冲锋范围！");
                 }
                 else if (!AnyRoleCloser(GetAOEForTarget(Source.Position, actor.Position), PlayerRole.Share, PlayerRole.Share, (actor.Position - Source.Position).LengthSq()))
                 {
-                    hints.Add("Hide behind tank!");
+                    hints.Add("躲到坦克身后！");
                 }
 
                 break;
@@ -71,15 +71,15 @@ public class GenericWildCharge(BossModule module, float halfWidth, uint aid = de
                 }
                 if (numShares == 0)
                 {
-                    hints.Add("Stay inside charge!");
+                    hints.Add("进入冲锋范围！");
                 }
                 else if (numShares > 1)
                 {
-                    hints.Add("Stay in single charge!");
+                    hints.Add("只站在一个冲锋范围内！");
                 }
                 else if (badShare)
                 {
-                    hints.Add(PlayerRoles[slot] == PlayerRole.Share ? "Move closer to charge source!" : "Hide behind tank!");
+                    hints.Add(PlayerRoles[slot] == PlayerRole.Share ? "靠近冲锋源！" : "躲到坦克身后！");
                 }
 
                 break;
@@ -92,7 +92,7 @@ public class GenericWildCharge(BossModule module, float halfWidth, uint aid = de
 
                 if (inCharge)
                 {
-                    hints.Add("GTFO from charge!");
+                    hints.Add("离开冲锋范围！");
                 }
 
                 break;
@@ -258,11 +258,11 @@ public class InverseWildCharge(BossModule module, float halfWidth, float distanc
 
                 if (inOtherChargeInv)
                 {
-                    hints.Add("GTFO from other charges!");
+                    hints.Add("离开其他冲锋范围！");
                 }
                 else if (!AnyRoleCloser(GetAOEForTarget(Source.Position, actor.Position, distancebehind), PlayerRole.Share, PlayerRole.Share, (actor.Position - Source.Position).LengthSq()))
                 {
-                    hints.Add("Hide behind tank!");
+                    hints.Add("躲到坦克身后！");
                 }
 
                 break;
@@ -288,11 +288,11 @@ public class InverseWildCharge(BossModule module, float halfWidth, float distanc
                 }
                 if (numSharesInv == 0)
                 {
-                    hints.Add("Stay inside charge!");
+                    hints.Add("进入冲锋范围！");
                 }
                 else if (numSharesInv > 1)
                 {
-                    hints.Add("Stay in single charge!");
+                    hints.Add("只站在一个冲锋范围内！");
                 }
                 else if (badShareInv)
                 {
@@ -309,7 +309,7 @@ public class InverseWildCharge(BossModule module, float halfWidth, float distanc
 
                 if (inChargeInv)
                 {
-                    hints.Add("GTFO from charge!");
+                    hints.Add("离开冲锋范围！");
                 }
 
                 break;

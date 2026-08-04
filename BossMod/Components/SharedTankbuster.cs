@@ -45,7 +45,7 @@ public class GenericSharedTankbuster(BossModule module, uint aid, AOEShape shape
         }
         else
         {
-            hints.Add("GTFO from tank!", InAOE(actor));
+            hints.Add("离开坦克！", InAOE(actor));
         }
     }
 
