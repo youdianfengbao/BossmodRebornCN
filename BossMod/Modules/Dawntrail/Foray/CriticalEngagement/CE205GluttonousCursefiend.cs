@@ -48,13 +48,20 @@ public enum AID : uint
 
 sealed class MiasmaBoundary(BossModule module) : Components.GenericAOEs(module)
 {
-    // Replay-verified (2026-08-02): deathwall ~25.0y (24.4-25.5y interval, 4 kills recorded;
-    // 24.42y survived, 25.52y lethal). Inner radius keeps 1y margin inside the measured wall so the
-    // 24.42y safe edge is not warned; outer radius hugs the wall - beyond it is fully dead.
-    private static readonly AOEShapeDonut Shape = new(24.0f, 25.5f);
+    // Deathwall values merged from both measurements: inner edge 23.5f per the upstream live
+    // coordinate grab (Z -23.78 / +23.4), outer edge 25.5f per the local replay kills
+    // (24.42y survived / 25.52y lethal, 2026-08-02). The 1y inner margin is dropped to match the
+    // measured 23.5 wall; beyond 25.5 is fully dead.
+    private static readonly AOEShapeDonut Shape = new(23.5f, 25.5f);
     private readonly AOEInstance[] _aoe = [new(Shape, module.Arena.Center)];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
+
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    {
+        Arena.ZoneDonut(Arena.Center, 22.5f, 23.5f, Colors.Danger);
+        Arena.ZoneCircleOutlineUnclipped(Arena.Center, 23.5f, Colors.Danger, 3f);
+    }
 }
 
 // These actions all have usable CastStart packets in the replays. Keep the warning active until

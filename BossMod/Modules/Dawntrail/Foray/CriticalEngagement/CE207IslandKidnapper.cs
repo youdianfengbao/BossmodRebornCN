@@ -132,11 +132,28 @@ sealed class KidnapperAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
         (uint)AID.GaleBlade => new(Half),
         (uint)AID.DispersingGales => new(Cone),
         (uint)AID.RendingWind => new(Rending),
-        (uint)AID.WindBloom => new(Bloom),
         (uint)AID.Downburst => new(Downburst, true),
         (uint)AID.CycloneRing => new(Ring),
         _ => null
     };
+}
+
+// 冰花: emitter 的 B953 cast 事件偶发缺失 (ARR 第 4 波无 cast), 依赖 cast 会漏画。
+// 改为直接从存活 emitter 实时画 13y 圈, 不依赖 cast 事件。
+sealed class WindBloomAOEs(BossModule module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeCircle Shape = new(13f);
+    private readonly List<AOEInstance> _displayed = [with(8)];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        _displayed.Clear();
+        foreach (var emitter in Module.Enemies((uint)OID.Emitter))
+            if (!emitter.IsDeadOrDestroyed)
+                _displayed.Add(new(Shape, emitter.Position, color: Colors.Danger, actorID: emitter.InstanceID,
+                    shapeDistance: Shape.Distance(emitter.Position, default)));
+        return CollectionsMarshal.AsSpan(_displayed);
+    }
 }
 
 // GenericKnockback only renders displacement and does not add an AI forbidden zone. The moving
@@ -587,6 +604,7 @@ sealed class IslandKidnapperStates : StateMachineBuilder
         TrivialPhase()
             .ActivateOnEnter<WindBoundary>()
             .ActivateOnEnter<KidnapperAOEs>()
+            .ActivateOnEnter<WindBloomAOEs>()
             .ActivateOnEnter<HurricaneHazards>()
             .ActivateOnEnter<HurricaneKnockbacks>()
             .ActivateOnEnter<RendingWindTelegraphs>()
