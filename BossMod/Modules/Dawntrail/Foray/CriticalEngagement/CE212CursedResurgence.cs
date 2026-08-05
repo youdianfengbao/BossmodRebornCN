@@ -401,6 +401,26 @@ sealed class MagicBarrierDirectionalParry(BossModule module) : Components.Direct
             AddForbiddenSide(hints, barrier, forbidden, Side.Left, 90f.Degrees());
             AddForbiddenSide(hints, barrier, forbidden, Side.Back, 180f.Degrees());
             AddForbiddenSide(hints, barrier, forbidden, Side.Right, 270f.Degrees());
+
+            // 引导 AI 到安全面攻击: 只设 Invincible 会让停在无敌面的 AI 发呆, 不绕到安全侧。
+            var safe = (Side)(Side.All & ~forbidden);
+            if (IsSingleSide(safe))
+            {
+                var facing = barrier.Rotation.ToDirection();
+                var dir = safe switch
+                {
+                    Side.Front => facing,
+                    Side.Back => -facing,
+                    Side.Left => facing.OrthoL(),
+                    Side.Right => facing.OrthoR(),
+                    _ => default
+                };
+                if (dir != default)
+                {
+                    var goal = barrier.Position + dir * 8f;
+                    hints.GoalZones.Add(AIHints.GoalSingleTarget(goal, 4f, 20f));
+                }
+            }
         }
     }
 

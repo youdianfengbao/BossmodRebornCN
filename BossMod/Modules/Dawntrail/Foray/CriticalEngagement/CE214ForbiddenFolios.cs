@@ -1,4 +1,5 @@
 using BossMod.Dawntrail.Foray.CriticalEngagement;
+using System.Linq;
 
 namespace BossMod.Dawntrail.Foray.CriticalEngagement.CE214ForbiddenFolios;
 
@@ -179,7 +180,7 @@ sealed class ThunderII(BossModule module) : ReplayValidatedCastAOEs(module)
     // Hit reconstruction puts every confirmed target within 2.74y of the lane center (including
     // player hitbox) while non-targets begin at the same boundary. A 5y-wide lane leaves the
     // intended 5y gaps between helpers spaced 10y apart; width 10 falsely tiles the whole arena.
-    private static readonly AOEShapeRect Shape = new(50f, 2.5f);
+    private static readonly AOEShapeRect Shape = new(25f, 2.5f, 25f);
     // Both batches resolve two seconds apart. Widening the risk window to cover both at once made
     // the full lane frame leave no safe cell (regression: noSafeFrames), so the second batch must
     // stay preview until the first resolves; the 0.25s tail is unavoidable without a per-batch
@@ -196,10 +197,10 @@ sealed class HorizontalRule(BossModule module) : Components.GenericAOEs(module)
 {
     // 6y-wide lanes (3 half-width): the grid requires the lanes to tile without overlap or gaps
     // (batch step is 6y, so the lane width must be 6y too), and the replay hits peak at 2.94y
-    // off-axis (5y half-width is excluded by that sample). lengthBack=50 makes the lane span the
+    // off-axis (5y half-width is excluded by that sample). lengthBack=25 makes the lane span the
     // whole arena both ways along its axis (vertical lanes north-south, horizontal east-west) -
     // the default 0 left only the half toward the cast direction, showing short lanes.
-    private static readonly AOEShapeRect Shape = new(50f, 3f, 50f);
+    private static readonly AOEShapeRect Shape = new(25f, 3f, 25f);
     private const double EventResolveTolerance = 0.5d;
     private const double ExpireDelay = 2d;
     private readonly List<AOEInstance> _pending = [with(16)];
@@ -298,10 +299,11 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
     private enum SectorKind { Level3, Level4, Level4Wide, Level5, Prime, PrimeWide }
     private readonly record struct SectorConfig(SectorKind Kind, AOEShape Shape, OID PageOID);
 
-    private sealed class PendingSector(SectorKind kind, AOEShape shape, Angle rotation, DateTime activation, ulong casterID)
+    private sealed class PendingSector(SectorKind kind, AOEShape shape, WPos origin, Angle rotation, DateTime activation, ulong casterID)
     {
         public readonly SectorKind Kind = kind;
         public readonly AOEShape Shape = shape;
+        public readonly WPos Origin = origin;
         public readonly Angle Rotation = rotation;
         public readonly DateTime Activation = activation;
         public readonly HashSet<ulong> Casters = [casterID];
@@ -327,14 +329,13 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
 
         foreach (var sector in _pending)
         {
-            // The knowledge cone radiates from the boss (arena center) toward the announced
-            // direction; the page merely announces which rule the sector uses.
-            var direction = sector.Rotation;
+            // The knowledge cone originates at the page's position and faces the arena center.
+            var direction = Angle.FromDirection(Module.Arena.Center - sector.Origin);
             if (!unknown && SatisfiesRule(level, sector.Kind))
                 continue; // safe sector: no zone drawn (the in-arena green guide was removed per user feedback)
 
-            _displayed.Add(new(sector.Shape, Module.Arena.Center, direction, sector.Activation,
-                actorID: sector.Casters.FirstOrDefault(), shapeDistance: sector.Shape.Distance(Module.Arena.Center, direction)));
+            _displayed.Add(new(sector.Shape, sector.Origin, direction, sector.Activation,
+                actorID: sector.Casters.FirstOrDefault(), shapeDistance: sector.Shape.Distance(sector.Origin, direction)));
         }
         return CollectionsMarshal.AsSpan(_displayed);
     }
@@ -378,7 +379,7 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
             return;
         }
 
-        _pending.Add(new(config.Kind, config.Shape, spell.Rotation, activation, caster.InstanceID));
+        _pending.Add(new(config.Kind, config.Shape, caster.Position, spell.Rotation, activation, caster.InstanceID));
         _pending.Sort((left, right) => left.Activation.CompareTo(right.Activation));
     }
 
@@ -469,7 +470,36 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
 // stand in (victims cluster inside each 3y book). Draw Unbound Ink as a red circle and BookDrop
 // as a tower.
 sealed class UnboundInk(BossModule module) : Components.SimpleAOEs(module, (uint)AID.UnboundInk, new AOEShapeCircle(9f));
-sealed class BookDropTower(BossModule module) : Components.CastTowers(module, (uint)AID.BookDrop, 3f, 1, 2);
+// 丢书塔: 每波多个书随机选 2 个塔踩 (1-2 人), 不是全部塔都要踩。
+sealed class BookDropTower(BossModule module) : Components.GenericTowers(module, (uint)AID.BookDrop)
+{
+    private const float Radius = 3f;
+    private const int MaxTowersPerWave = 2;
+    private const int WaveSize = 5;
+    private readonly List<(ulong ID, WPos Pos, DateTime Act)> _pending = [with(8)];
+    private readonly Random _rng = new();
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID != WatchedAction)
+            return;
+        _pending.Add((caster.InstanceID, spell.LocXZ, Module.CastFinishAt(spell)));
+        if (_pending.Count < WaveSize)
+            return;
+
+        // 每波收齐后随机选 MaxTowersPerWave 个塔, 固定下来避免 AI 每帧抖动。
+        var chosen = _pending.OrderBy(_ => _rng.Next()).Take(MaxTowersPerWave);
+        foreach (var t in chosen)
+            Towers.Add(new(t.Pos, Radius, 1, 2, activation: t.Act, actorID: t.ID));
+        _pending.Clear();
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == WatchedAction)
+            Towers.RemoveAll(t => t.ActorID == caster.InstanceID);
+    }
+}
 
 // The three B8DF helpers carry duplicate damage packets; the boss cast is the stable warning.
 sealed class Marginalia(BossModule module) : Components.RaidwideCast(module, (uint)AID.Marginalia);
