@@ -46,9 +46,10 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeCircle Shape = new(4f);
     private static readonly AOEShapeCircle AIShape = new(5.5f);
-    // 2026-08-02 user request: shrink the movement-prediction capsule 8y -> 6.5y (half-width 5.5f
-    // and the 5.5y body circle stay unchanged) - the 8y lead over-reacted to fast blade sweeps
-    // and pushed the AI out of the safe pocket early.
+    // 2026-08-02 user request: shrink the movement-prediction capsule lead 8y -> 6.5y (the 8y
+    // lead over-reacted to fast blade sweeps and pushed the AI out of the safe pocket early),
+    // then fit the capsule width to the blade body (r4, 8y wide) + 0.5y margin -> half-width
+    // 4.25f (was 5.5f); the 5.5y AI body circle stays unchanged.
     private const float PredictionLength = 6.5f;
     private readonly List<Actor> _blades = module.Enemies((uint)OID.AlabasterBlade);
     private readonly List<AOEInstance> _active = [with(8)];
@@ -68,7 +69,7 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
         {
             hints.AddForbiddenZone(AIShape, blade.Position);
             if (blade.LastFrameMovement.LengthSq() > 0.0001f)
-                hints.AddForbiddenZone(new SDCapsule(blade.Position, blade.LastFrameMovement.Normalized(), PredictionLength, 5.5f));
+                hints.AddForbiddenZone(new SDCapsule(blade.Position, blade.LastFrameMovement.Normalized(), PredictionLength, 4.25f));
         }
 
         if (live.Length != 0)

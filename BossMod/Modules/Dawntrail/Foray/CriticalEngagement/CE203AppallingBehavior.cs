@@ -161,6 +161,17 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
         }
     }
 
+    // Four-keeper chain: activation of the instruction pending occupying the given slot (0-based),
+    // or null while that slot is not resolved yet. Consumed by ChainSafeGuide to publish the
+    // circle target as an imminent forbidden zone.
+    public DateTime? InstructionActivation(int slot)
+    {
+        for (var i = 0; i < _pending.Count; ++i)
+            if (_pending[i].InstructionSlot == slot)
+                return _pending[i].Activation;
+        return null;
+    }
+
     public override void Update()
     {
         SyncInstructionShapes();
@@ -517,11 +528,12 @@ sealed class ChainSafeGuide(BossModule module) : BossComponent(module)
             var p2 = Arena.Center + SpotDist * (dir - 115f.Degrees()).ToDirection();
             return PickSafeSide(p1, p2, index);
         }
-        // Cone: the danger wedge sits on the negative side of the axis, so +-60 deg are the two
-        // candidate sides. A single candidate could land inside the next AOE's zone with no
-        // fallback (live feedback), so both sides are tested like the circle branch.
-        var c1 = Arena.Center + SpotDist * (dir + 60f.Degrees()).ToDirection();
-        var c2 = Arena.Center + SpotDist * (dir - 60f.Degrees()).ToDirection();
+        // Cone: the danger wedge sits on the negative side of the axis, so +-45 deg are the two
+        // candidate sides (still far past the wedge boundary, keeping the guide clear of it). A
+        // single candidate could land inside the next AOE's zone with no fallback (live feedback),
+        // so both sides are tested like the circle branch.
+        var c1 = Arena.Center + SpotDist * (dir + 45f.Degrees()).ToDirection();
+        var c2 = Arena.Center + SpotDist * (dir - 45f.Degrees()).ToDirection();
         return PickSafeSide(c1, c2, index);
     }
 
@@ -598,7 +610,18 @@ sealed class ChainSafeGuide(BossModule module) : BossComponent(module)
         if (_preparing)
             hints.GoalZones.Add(AIHints.GoalSingleTarget(Arena.Center, PrepRadius, PrepWeight));
         if (_resolved < 3 && SafeSpot(_resolved) is { } target)
+        {
             hints.GoalZones.Add(AIHints.GoalSingleTarget(target, GuideRadius, GuideWeight));
+            // Circle target: publish the circle's danger zone into the AI view (activation from
+            // the matching instruction pending, falling back to now) so the AI treats it as
+            // imminent and leaves the circle at once - a second layer next to the green-circle
+            // guide (the cone needs no zone: the side selection already keeps the guide outside).
+            if (Schedule?.Entry(_resolved) is { Kind: AID.PlaincrackerInstruction, Pos: var center })
+            {
+                var activation = Module.FindComponent<AppallingAOEs>()?.InstructionActivation(_resolved) ?? WorldState.CurrentTime;
+                hints.AddForbiddenZone(new AOEShapeCircle(30f).Distance(center, default), activation);
+            }
+        }
     }
 }
 
