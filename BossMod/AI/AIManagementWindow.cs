@@ -129,16 +129,36 @@ sealed class AIManagementWindow : UIWindow
             configModified = true;
         }
         ImGui.SameLine();
-        ImGui.Text("最大距离 - 至目标");
+        ImGui.Text("最大距离 - 近战/坦克");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(100);
-        var maxDistanceTargetStr = _config.MaxDistanceToTarget.ToString(CultureInfo.InvariantCulture);
-        if (ImGui.InputText("##MaxDistanceToTarget", ref maxDistanceTargetStr, 64))
+        var meleeMaxDistanceTargetStr = _config.MeleeMaxDistanceToTarget.ToString(CultureInfo.InvariantCulture);
+        if (ImGui.InputText("##MeleeMaxDistanceToTarget", ref meleeMaxDistanceTargetStr, 64))
         {
-            maxDistanceTargetStr = maxDistanceTargetStr.Replace(',', '.');
-            if (float.TryParse(maxDistanceTargetStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var maxDistance))
+            meleeMaxDistanceTargetStr = meleeMaxDistanceTargetStr.Replace(',', '.');
+            if (float.TryParse(meleeMaxDistanceTargetStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var maxDistance))
             {
-                _config.MaxDistanceToTarget = maxDistance;
+                _config.MeleeMaxDistanceToTarget = maxDistance;
+                configModified = true;
+            }
+        }
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.BeginTooltip();
+            ImGui.Text("与目标保持的最大距离，单位为星码。");
+            ImGui.EndTooltip();
+        }
+        ImGui.SameLine();
+        ImGui.Text("- 远程/治疗");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(100);
+        var rangedMaxDistanceTargetStr = _config.RangedMaxDistanceToTarget.ToString(CultureInfo.InvariantCulture);
+        if (ImGui.InputText("##RangedMaxDistanceToTarget", ref rangedMaxDistanceTargetStr, 64))
+        {
+            rangedMaxDistanceTargetStr = rangedMaxDistanceTargetStr.Replace(',', '.');
+            if (float.TryParse(rangedMaxDistanceTargetStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var maxDistance))
+            {
+                _config.RangedMaxDistanceToTarget = maxDistance;
                 configModified = true;
             }
         }

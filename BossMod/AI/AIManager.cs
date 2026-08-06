@@ -195,9 +195,10 @@ sealed class AIManager : IDisposable
                 configModified = cfgPositional != _config.DesiredPositional;
                 break;
             case "MAXDISTANCETARGET":
-                var cfgMDT = _config.MaxDistanceToTarget;
+                var cfgMDTMelee = _config.MeleeMaxDistanceToTarget;
+                var cfgMDTRanged = _config.RangedMaxDistanceToTarget;
                 HandleMaxDistanceTargetCommand(messageData);
-                configModified = cfgMDT != _config.MaxDistanceToTarget;
+                configModified = cfgMDTMelee != _config.MeleeMaxDistanceToTarget || cfgMDTRanged != _config.RangedMaxDistanceToTarget;
                 break;
             case "MAXDISTANCESLOT":
                 var cfgMDS = _config.MaxDistanceToSlot;
@@ -629,10 +630,21 @@ sealed class AIManager : IDisposable
             return;
         }
 
-        _config.MaxDistanceToTarget = distance;
+        // 按当前玩家职业设置对应配置（近战/坦克 vs 远程/治疗），2026-08-07 由单一配置拆分而来
+        var player = WorldState.Party.Player();
+        var isMelee = player == null || player.Role is Role.Melee or Role.Tank;
+        if (isMelee)
+        {
+            _config.MeleeMaxDistanceToTarget = distance;
+        }
+        else
+        {
+            _config.RangedMaxDistanceToTarget = distance;
+        }
+
         if (_config.EchoToChat)
         {
-            Service.ChatGui.Print($"[BMRAI] 到目标的最大距离已设为 {distance.ToString(System.Globalization.CultureInfo.InvariantCulture)}y");
+            Service.ChatGui.Print($"[BMRAI] {(isMelee ? "近战/坦克" : "远程/治疗")}到目标的最大距离已设为 {distance.ToString(System.Globalization.CultureInfo.InvariantCulture)}y");
         }
     }
 

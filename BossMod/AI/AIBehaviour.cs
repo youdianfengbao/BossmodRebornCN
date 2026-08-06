@@ -182,7 +182,10 @@ sealed class AIBehaviour(AIController ctrl, RotationModuleManager autorot, Prese
         // now give class module a chance to improve targeting
         // typically it would switch targets for multidotting, or to hit more targets with AOE
         // in case of ties, it should prefer to return original target - this would prevent useless switches
-        var targeting = new Targeting(target!, player.Role is Role.Melee or Role.Tank ? 2.6f : 24.5f);
+        var range = player.Role is Role.Melee or Role.Tank
+            ? _config.MeleeMaxDistanceToTarget
+            : _config.RangedMaxDistanceToTarget;
+        var targeting = new Targeting(target!, range);
 
         var pos = autorot.Hints.RecommendedPositional;
         if (pos.Target != null && targeting.Target.Actor == pos.Target)
@@ -254,10 +257,14 @@ sealed class AIBehaviour(AIController ctrl, RotationModuleManager autorot, Prese
         }
         if (_followMaster)
         {
+            // 跟随目标时的最大距离按职业取对应配置（近战/坦克 vs 远程/治疗），2026-08-07 由单一配置拆分而来
+            var targetMaxDist = player.Role is Role.Melee or Role.Tank
+                ? _config.MeleeMaxDistanceToTarget
+                : _config.RangedMaxDistanceToTarget;
             var target = autorot.WorldState.Actors.Find(player.TargetID);
             if ((!_config.FollowTarget || _config.FollowTarget && target == null) && master != player)
             {
-                autorot.Hints.GoalZones.Add(AIHints.GoalSingleTarget(master, Positional.Any, _config.FollowTarget && player.InCombat ? _config.MaxDistanceToTarget : _config.MaxDistanceToSlot));
+                autorot.Hints.GoalZones.Add(AIHints.GoalSingleTarget(master, Positional.Any, _config.FollowTarget && player.InCombat ? targetMaxDist : _config.MaxDistanceToSlot));
             }
             else if (_config.FollowTarget && target != null && AIPreset == null)
             {
@@ -265,12 +272,13 @@ sealed class AIBehaviour(AIController ctrl, RotationModuleManager autorot, Prese
                     ? autorot.Hints.RSRDesiredPositional
                     : _config.DesiredPositional;
                 var mindist = _config.MinDistance;
-                var maxdist = _config.MaxDistanceToTarget;
+                var maxdist = targetMaxDist;
                 if (positional is Positional.Rear or Positional.Flank && (target.CastInfo == null && target.NameID != 541u && target.TargetID == player.InstanceID || target.Omnidirectional)) // if player is target, rear/flank is usually impossible unless target is casting
                 {
                     positional = Positional.Any;
                 }
 
+                // 有身位要求时固定贴近目标 2.6f（与近战/远程距离配置无关，2026-08-07）
                 autorot.Hints.GoalZones.Add(AIHints.GoalSingleTarget(master, positional, positional != Positional.Any ? 2.6f : maxdist));
 
                 if (mindist != default && target.InstanceID != player.InstanceID && interactTarget == null)

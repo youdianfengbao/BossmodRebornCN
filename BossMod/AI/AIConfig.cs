@@ -46,8 +46,11 @@ sealed class AIConfig : ConfigNode
     [PropertyDisplay("到插槽的最大距离")]
     public float MaxDistanceToSlot = 1f;
 
-    [PropertyDisplay("到目标的最大距离")]
-    public float MaxDistanceToTarget = 2.6f;
+    [PropertyDisplay("到目标的最大距离(近战/坦克)")]
+    public float MeleeMaxDistanceToTarget = 2.6f;
+
+    [PropertyDisplay("到目标的最大距离(远程/治疗)")]
+    public float RangedMaxDistanceToTarget = 24.5f;
 
     [PropertyDisplay("到碰撞箱的最小距离")]
     public float MinDistance = default;
