@@ -31,11 +31,11 @@ public enum AID : uint
     AutoAttack = 48421, // Index->player, no cast, single-target
     Flare = 48415, // Index->self, 5.0s cast, single-target
     Flare1 = 48417, // IndexHelper->self, no cast, ???
-    SealedImplements = 48384, // Index->self, 5.0+2.0s cast, single-target
-    RomeosBallad = 48385, // IndexHelper->self, 7.0s cast, range 15 circle
+    SealedImplements = 48384, // Index->self, 5.0+2.0s cast, 封印武器·远离（伴 Helper 48385 爱之歌）
+    RomeosBallad = 48385, // IndexHelper->self, 7.0s cast, 爱之歌：中心 R15 圈（玩家需远离，站圈外）
     UnknownWeaponskill1 = 50665, // Index->self, no cast, single-target
-    SealedImplements1 = 48386, // Index->self, 5.0+2.1s cast, single-target
-    Aim = 48387, // IndexHelper->self, 7.1s cast, range 11 circle
+    SealedImplements1 = 48386, // Index->self, 5.0+2.1s cast, 封印武器·靠近（伴 Helper 48387 盯准）
+    Aim = 48387, // IndexHelper->self, 7.1s cast, 盯准：场边 R20.5 处 R11 圈 ×3/×6（玩家需靠近中心，圈内危险）
     OmniElements = 48394, // Index->self, 4.0+1.0s cast, single-target
     OmniElements1 = 48395, // IndexHelper->self, no cast, ???
     ElementaryEvocation = 48400, // Index->self, 3.0s cast, single-target
@@ -45,23 +45,25 @@ public enum AID : uint
     ThunderIV = 48398, // IndexHelper->self, no cast, range 30 ?-degree cone
     ElementaryChemistry = 48401, // Index->self, 3.9+1.1s cast, single-target
     ElementaryChemistry1 = 48402, // IndexHelper->self, no cast, ???
-    UnknownWeaponskill2 = 48905, // IndexHelper->self, 6.0s cast, range 15 width 15 rect
-    PropulsiveProphecy = 48403, // Index->self, 3.0s cast, single-target
+    UnknownWeaponskill2 = 48905, // IndexHelper->self, 6.0s cast, 元素整合判定：rect 15x15 ×3 @ 场边三角 (0,-656)/(±24.249,-614)，与 48401 同步（回放实测）
+    PropulsiveProphecy = 48403, // Index->self, 2.7s cast, 飞翔指令（元素阶段收尾转场）
     Jump = 48404, // TranscribedIndex->self, no cast, single-target
-    Shockwave = 48406, // IndexHelper->self, 5.0s cast, ???
-    Shockwave1 = 48405, // HolyLance->self, 5.0s cast, single-target
-    Summon = 48408, // Index->self, 3.0s cast, single-target
+    Shockwave = 48406, // IndexHelper->self, 5.0s cast, 冲击波：与圣枪同位置 R15（视觉/判定冗余，×6）
+    Shockwave1 = 48405, // HolyLance->self, 5.0s cast, 圣枪冲击波：圣枪位 R15 圆 ×3（回放实测北枪覆盖玩家、南两枪不覆盖）
+    Summon = 48408, // Index->self, 3.0s cast, 召唤：生成被召唤的爆弹怪 4B60 ×3（场边三角位，无技能）
     DuologyOfImplements = 48388, // Index->self, 5.0+1.0s cast, single-target
-    Iainuki = 48389, // IndexHelper->self, 6.0s cast, range 30 60.000-degree cone
+    DuologyOfImplements2 = 48390, // Index->self, 3.7s cast, 二连召唤·封印武器（连招版：伴 48391 镰鼬/48389 居合/48903，回放实测）
+    Iainuki = 48389, // IndexHelper->self, 6.0s cast, 居合斩：60° cone R30 ×3（与 48390 连招，方向 -120/120/0）
     SealedImplements2 = 48904, // Index->self, no cast, single-target
-    WindSlash = 48391, // IndexHelper->self, 6.0s cast, range 30 60.000-degree cone
-    AllKnowingFlames = 48418, // Index->self, 5.0s cast, single-target
-    AllConsumingFlames = 48420, // IndexHelper->players, no cast, range 6 circle
-    Predict = 48412, // Index->self, 3.0s cast, single-target
-    Cleansing = 48414, // ForetoldPhenomenon->self, 0.5s cast, range ?-15 donut
-    Starfall = 48413, // ForetoldPhenomenon->self, 0.5s cast, range 10 circle
-    Dualcast = 48407, // Index->self, 3.0s cast, single-target
-    Flare2 = 48416, // Index->self, no cast, single-target
+    SealedImplements3 = 48903, // Index->self, 1.7s cast, 封印武器·连招版收尾（回放实测）
+    WindSlash = 48391, // IndexHelper->self, 6.0s cast, 镰鼬之风：60° cone R30 ×3（与 48390 连招，方向 180/-60/60）
+    AllKnowingFlames = 48418, // Index->self, 4.7s cast, 全知烈火（读条结束后 Helper 48420 对全体玩家 R6 分散，3 批）
+    AllConsumingFlames = 48420, // IndexHelper->players, no cast, 全知劫火：玩家位置 range 6 circle（分散判定）
+    Predict = 48412, // Index->self, 2.7s cast, 预言（生成预言现象 4B63 ×3，瞬移后读条 48413/48414）
+    Cleansing = 48414, // ForetoldPhenomenon->self, 0.5s cast, 天崩地裂：R5-15 donut（北侧 1 个）
+    Starfall = 48413, // ForetoldPhenomenon->self, 0.5s cast, 陨石：range 10 circle（南侧 2 个）
+    Dualcast = 48407, // Index->self, 2.7s cast, 连续咏唱（后接双核爆 48415+48416）
+    Flare2 = 48416, // Index->self, no cast, 核爆·二段（连续咏唱后，全屏）
 }
 
 public enum SID : uint

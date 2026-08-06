@@ -4,7 +4,7 @@
 // 数据导入生成。
 namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN4Index;
 
-[ModuleInfo(BossModuleInfo.Maturity.Dummy, // 开发中屏蔽，机制完成后启用
+[ModuleInfo(BossModuleInfo.Maturity.Dummy, // boss4 恢复开发隐藏（2026-08-07：boss1 实测通过，boss4 待实测）
     StatesType = typeof(IndexStates),
     ConfigType = null, // 如需要可替换为 typeof(IndexConfig)
     ObjectIDType = typeof(OID),
@@ -22,6 +22,24 @@ namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN4Index;
     SortOrder = 4,
     PlanLevel = 0)]
 [SkipLocalsInit]
-// 场地圆形 R28：2026-08-06 回放实测目录瞬移站位 R28 硬证据，原 Square(28f) 改为圆形。
-// 异形轮廓待后续用 ReplayAnalysis 凹包工具补 Custom 边界。
-public sealed class Index(WorldState ws, Actor primary) : BossModule(ws, primary, new(0f, -628f), new ArenaBoundsCircle(28f));
+// 异形场地（2026-08-07 用户实测，爆弹怪三点硬验证，详见 Arena.cs）：中心六边形边长 15 + 外接正方形平台，
+// 初始 3 个（南/东北/西北）→ 元素控制读条结束 6 个 → 元素整合读条结束回收 3 个；内圈边长 6 正六边形
+// 以挖洞实现即死区（2026-08-07 用户实测修正，无独立绘制组件）。
+// 注意：ArenaBoundsCustom 中心=形状包围盒中心（初始 3 平台组合为 (0,-624.25)），UpdateModule 每帧同步 Arena.Center。
+public sealed class Index : BossModule
+{
+    public Index(WorldState ws, Actor primary) : base(ws, primary, new(0f, -628f), IndexArena.InitialBounds)
+    {
+        ActivateComponent<ArenaShapes>();
+    }
+
+    protected override void UpdateModule()
+    {
+        // 同步 Bounds 中心（2026-08-07 用户要求固定：Initial/Full 两版 Bounds 均以 CenterOverride 固定为 (0,-628)，
+        // 切换 bounds 时中心不再跳变；Arena.Center 必须与 Bounds.Center 一致，否则路径图/判定错位）
+        if (Arena.Bounds is ArenaBoundsCustom bounds)
+        {
+            Arena.Center = bounds.Center;
+        }
+    }
+}

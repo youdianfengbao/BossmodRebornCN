@@ -84,9 +84,9 @@ sealed class ThunderboltPuddle(BossModule module) : Components.GenericAOEs(modul
         if (_aoes.Count == 0)
             return CollectionsMarshal.AsSpan(_displayed);
 
-        var riskyDeadline = _aoes[0].Activation.AddSeconds(0.2d);
+        var riskyDeadline = _aoes[0].Activation.AddSeconds(1.0d);
         // All nine casts start together, so show the complete route immediately. Only the next
-        // circle is risky; later circles are planning markers and must not constrain pathfinding.
+        // three circles are risky; later circles are planning markers and must not constrain pathfinding.
         for (var i = 0; i < _aoes.Count; ++i) {
             var aoe = _aoes[i];
             aoe.Risky = aoe.Activation <= riskyDeadline;

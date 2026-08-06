@@ -489,8 +489,10 @@ public sealed class ArenaBoundsCustom : ArenaBounds
     public readonly WPos Center;
     public bool IsCircle; // can be used by gaze component for gazes outside of the arena
 
-    public ArenaBoundsCustom(Shape[] UnionShapes, Shape[]? DifferenceShapes = null, Shape[]? AdditionalShapes = null, float MapResolution = 0.5f, float ScaleFactor = 1f, bool AllowObstacleMap = false, float Offset = default, bool AdjustForHitboxInwards = false, bool AdjustForHitboxOutwards = false)
-    : base(BuildBounds(UnionShapes, DifferenceShapes ?? [], AdditionalShapes ?? [], ScaleFactor, AdjustForHitboxInwards, AdjustForHitboxOutwards, out var poly, out var center, out var halfWidth, out var halfHeight), MapResolution, ScaleFactor, AllowObstacleMap)
+    // CenterOverride：可选显式指定 bounds 中心（多边形顶点同步平移以匹配），默认 null=按形状包围盒自动计算。
+    // 用途（2026-08-07 FTMN4）：不同阶段场地形状包围盒中心不同（3 平台 vs 6 平台），固定中心避免雷达视图切换时跳动。
+    public ArenaBoundsCustom(Shape[] UnionShapes, Shape[]? DifferenceShapes = null, Shape[]? AdditionalShapes = null, float MapResolution = 0.5f, float ScaleFactor = 1f, bool AllowObstacleMap = false, float Offset = default, bool AdjustForHitboxInwards = false, bool AdjustForHitboxOutwards = false, WPos? CenterOverride = null)
+    : base(BuildBounds(UnionShapes, DifferenceShapes ?? [], AdditionalShapes ?? [], ScaleFactor, AdjustForHitboxInwards, AdjustForHitboxOutwards, CenterOverride, out var poly, out var center, out var halfWidth, out var halfHeight), MapResolution, ScaleFactor, AllowObstacleMap)
     {
         Center = center;
         HalfWidth = halfWidth + Offset;
@@ -499,9 +501,9 @@ public sealed class ArenaBoundsCustom : ArenaBounds
         offset = Offset;
     }
 
-    private static float BuildBounds(Shape[] unionShapes, Shape[]? differenceShapes, Shape[]? additionalShapes, float scalefactor, bool adjustForHitboxInwards, bool adjustForHitboxOutwards, out RelSimplifiedComplexPolygon poly, out WPos center, out float halfWidth, out float halfHeight)
+    private static float BuildBounds(Shape[] unionShapes, Shape[]? differenceShapes, Shape[]? additionalShapes, float scalefactor, bool adjustForHitboxInwards, bool adjustForHitboxOutwards, WPos? centerOverride, out RelSimplifiedComplexPolygon poly, out WPos center, out float halfWidth, out float halfHeight)
     {
-        var properties = CalculatePolygonProperties(unionShapes, differenceShapes ?? [], additionalShapes ?? [], adjustForHitboxInwards, adjustForHitboxOutwards);
+        var properties = CalculatePolygonProperties(unionShapes, differenceShapes ?? [], additionalShapes ?? [], adjustForHitboxInwards, adjustForHitboxOutwards, centerOverride);
         center = properties.Center;
         halfWidth = properties.HalfWidth;
         halfHeight = properties.HalfHeight;
@@ -509,7 +511,7 @@ public sealed class ArenaBoundsCustom : ArenaBounds
         return scalefactor == 1f ? properties.Radius : properties.Radius / scalefactor;
     }
 
-    private static (WPos Center, float HalfWidth, float HalfHeight, float Radius, RelSimplifiedComplexPolygon Poly) CalculatePolygonProperties(Shape[] unionShapes, Shape[] differenceShapes, Shape[] additionalShapes, bool adjustForHitboxInwards, bool adjustForHitboxOutwards)
+    private static (WPos Center, float HalfWidth, float HalfHeight, float Radius, RelSimplifiedComplexPolygon Poly) CalculatePolygonProperties(Shape[] unionShapes, Shape[] differenceShapes, Shape[] additionalShapes, bool adjustForHitboxInwards, bool adjustForHitboxOutwards, WPos? centerOverride)
     {
         var unionPolygons = ParseShapes(unionShapes);
         var differencePolygons = ParseShapes(differenceShapes);
@@ -597,6 +599,22 @@ public sealed class ArenaBoundsCustom : ArenaBounds
                 ref var vert = ref verts[j];
                 vert -= dir;
             }
+        }
+
+        // 可选显式中心：多边形整体平移到指定中心（保持世界坐标几何不变）
+        if (centerOverride != null && centerOverride.Value != center)
+        {
+            var shift = centerOverride.Value - center;
+            for (var i = 0; i < countCombined; ++i)
+            {
+                var verts = CollectionsMarshal.AsSpan(combined[i].Vertices);
+                for (var j = 0; j < verts.Length; ++j)
+                {
+                    verts[j] += shift;
+                }
+            }
+
+            center = centerOverride.Value;
         }
 
         return (center, halfWidth, halfHeight, Math.Max(maxDistX, maxDistZ), combinedPoly);

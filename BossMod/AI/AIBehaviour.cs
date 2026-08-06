@@ -285,11 +285,16 @@ sealed class AIBehaviour(AIController ctrl, RotationModuleManager autorot, Prese
             return await Task.Run(() => NavigationDecision.Build(_naviCtx, WorldState.CurrentTime, autorot.Hints, player, autorot.Bossmods.WorldState.Client.MoveSpeed, forbiddenZoneCushion: _config.PreferredDistance)).ConfigureAwait(false);
         }
 
+        // 2026-08-07 用户要求：注释 AI 兜底绿圈（原 TODO 逻辑，保留原文便于恢复）。
+        // 原行为：自控 AI 在模块无任何 GoalZones 时自动添加"站到目标首选距离"的绿色目标圈
+        // （近战/坦克 2.6y、远程 24.5y，AI 视觉反复出现且 AI 倾向向圈内移动）。
+        // 影响：自控 AI 不再有目标圈引导（仍攻击、仍避红色禁区 AddForbiddenZone）；跟随分支（MaxDistanceToTarget）不受影响。
+        // 恢复方法：取消以下注释即可。
         // TODO: remove this once all rotation modules are fixed
-        if (autorot.Hints.GoalZones.Count == 0 && targeting.Target != null)
-        {
-            autorot.Hints.GoalZones.Add(AIHints.GoalSingleTarget(targeting.Target.Actor, targeting.PreferredPosition, targeting.PreferredRange));
-        }
+        // if (autorot.Hints.GoalZones.Count == 0 && targeting.Target != null)
+        // {
+        //     autorot.Hints.GoalZones.Add(AIHints.GoalSingleTarget(targeting.Target.Actor, targeting.PreferredPosition, targeting.PreferredRange));
+        // }
 
         return await Task.Run(() => NavigationDecision.Build(_naviCtx, WorldState.CurrentTime, autorot.Hints, player, autorot.Bossmods.WorldState.Client.MoveSpeed, _config.PreferredDistance)).ConfigureAwait(false);
     }

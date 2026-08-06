@@ -80,6 +80,19 @@ sealed class WhatGoesAroundAOEs(BossModule module) : ReplayValidatedCastAOEs(mod
 // B84F is split across three helpers. The boss cast is the stable advance warning.
 sealed class DarkIV(BossModule module) : Components.RaidwideCast(module, (uint)AID.DarkIV);
 
+// 2026-08-07: 场地边界 21.5y 外的 21~22y 方环带是即死电网（用户实测 AI 出界踩电网死亡后增加）。
+// 用 AOEShapeCustom 表示：外方形半宽 22y 减去内方形半宽 21y，即半宽 21~22y 的方环带。
+// 永久常驻危险区（activation 为空），risky=true，AI 视为禁区回避并红色显示。
+sealed class WhatGoesAroundKillZone(BossModule module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeCustom KillZone = new(
+        [new Rectangle(new(224f, -860f), 22f, 22f)],
+        [new Rectangle(new(224f, -860f), 21f, 21f)]);
+    private static readonly AOEInstance[] KillZoneAOEs = [new(KillZone, new(224f, -860f), risky: true)];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => KillZoneAOEs;
+}
+
 // 2026-08-03: the upstream ElectricBoundary class (ARR BFD0 deaths ~24.4y) was NOT restored -
 // CN in-game observation shows the instakill boundary is a 21y SQUARE (see the module below);
 // the 24.5y square + fence overlay only drew dead zone between the fence and the kill boundary.
@@ -89,7 +102,8 @@ sealed class WhatGoesAroundStates : StateMachineBuilder
     {
         TrivialPhase()
             .ActivateOnEnter<WhatGoesAroundAOEs>()
-            .ActivateOnEnter<DarkIV>();
+            .ActivateOnEnter<DarkIV>()
+            .ActivateOnEnter<WhatGoesAroundKillZone>();
     }
 }
 
@@ -109,4 +123,7 @@ sealed class WhatGoesAroundStates : StateMachineBuilder
 // square, not circular, center 224,-860). Draw the battle area right up to that boundary; the old
 // 24.5y square and its electric fence overlay only showed dead zone between the fence and the kill
 // boundary.
-public sealed class WhatGoesAround(WorldState ws, Actor primary) : BossModule(ws, primary, new(224f, -860f), new ArenaBoundsSquare(21f));
+// 2026-08-07: arena bounds widened to 21.5f. The 21~22y band right outside the new bounds is a
+// permanent forbidden zone (WhatGoesAroundKillZone) - user observed AI deaths from pathing out of
+// bounds into the electric fence.
+public sealed class WhatGoesAround(WorldState ws, Actor primary) : BossModule(ws, primary, new(224f, -860f), new ArenaBoundsSquare(21.5f));
