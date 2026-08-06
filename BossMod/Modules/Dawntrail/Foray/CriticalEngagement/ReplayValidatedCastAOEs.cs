@@ -13,11 +13,13 @@ abstract class ReplayValidatedCastAOEs(BossModule module) : Components.GenericAO
     private const double EventDedupWindow = 2d;
     private const double ExpireDelay = 2d;
 
-    private sealed class PendingAOE(uint actionID, AOEInstance aoe)
+    protected sealed class PendingAOE(uint actionID, AOEInstance aoe)
     {
         public readonly uint ActionID = actionID;
         public AOEInstance AOE = aoe;
     }
+
+    protected ReadOnlySpan<PendingAOE> Pending => CollectionsMarshal.AsSpan(_pending);
 
     private readonly record struct ResolvedCast(uint ActionID, ulong ActorID, DateTime Activation, DateTime ExpiresAt);
     private readonly record struct EventKey(uint GlobalSequence, uint ActionID, ulong ActorID);
@@ -139,6 +141,23 @@ abstract class ReplayValidatedCastAOEs(BossModule module) : Components.GenericAO
         ++NumCasts;
         var activation = RemoveResolvedByEvent(spell.Action.ID, caster.InstanceID, now) ?? now;
         RememberResolved(spell.Action.ID, caster.InstanceID, activation, now);
+    }
+
+    // AI 避让入口：默认把所有 Risky AOE 加为禁区（与 GenericAOEs 行为一致）。子类可 override
+    // AddAOEForbiddenZones 定制 AI 层紧迫值（如 CE214 溅墨的分组方案），显示层 ActiveAOEs 不受影响。
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+        => AddAOEForbiddenZones(slot, actor, assignment, hints);
+
+    protected virtual void AddAOEForbiddenZones(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        var aoes = ActiveAOEs(slot, actor);
+        var len = aoes.Length;
+        for (var i = 0; i < len; ++i)
+        {
+            ref readonly var c = ref aoes[i];
+            if (c.Risky)
+                hints.AddForbiddenZone(c.ShapeDistance ?? c.Shape.Distance(c.Origin, c.Rotation), c.Activation);
+        }
     }
 
     public override void OnActorDeath(Actor actor) => RemoveActor(actor.InstanceID);

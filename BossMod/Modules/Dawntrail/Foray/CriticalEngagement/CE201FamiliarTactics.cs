@@ -38,7 +38,21 @@ public enum AID : uint
 
 sealed class FamiliarRaidwides(BossModule module) : Components.RaidwideCasts(module, [(uint)AID.HyperconductivePlasma, (uint)AID.AncientStorm]);
 sealed class BatteringArms(BossModule module) : Components.SingleTargetDelayableCast(module, (uint)AID.BatteringArms);
-sealed class SpinningSweep(BossModule module) : Components.SimpleAOEs(module, (uint)AID.SpinningSweep, new AOEShapeCone(40f, 60f.Degrees()));
+// 47541 SpinningSweep: 120-degree cone (r40) from the boss covering the whole arena.
+// 2026-08-05 user request: pin the forbidden activation to now so the AI treats the cone as
+// already active and bails out immediately instead of waiting for the cast to finish. The
+// display keeps the real cast-finish activation - only the AI urgency is forced.
+sealed class SpinningSweep(BossModule module) : Components.SimpleAOEs(module, (uint)AID.SpinningSweep, new AOEShapeCone(40f, 60f.Degrees()))
+{
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        // Force maximum urgency: activation pinned to now (AI treats the cone as already active
+        // and leaves immediately); the display keeps the real cast-finish activation.
+        var now = WorldState.CurrentTime;
+        foreach (var aoe in ActiveAOEs(slot, actor))
+            hints.AddForbiddenZone(aoe.Shape, aoe.Origin, aoe.Rotation, now);
+    }
+}
 
 // The blades remain dangerous while travelling. Their no-cast action effects (47531/47539)
 // only report contact after it happened, so the live actor positions are the useful warning.
@@ -46,11 +60,10 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeCircle Shape = new(4f);
     private static readonly AOEShapeCircle AIShape = new(5.5f);
-    // 2026-08-02 user request: shrink the movement-prediction capsule lead 8y -> 6.5y (the 8y
-    // lead over-reacted to fast blade sweeps and pushed the AI out of the safe pocket early),
-    // then fit the capsule width to the blade body (r4, 8y wide) + 0.5y margin each side ->
-    // half-width 4.5f (was 5.5f); the 5.5y AI body circle stays unchanged.
-    private const float PredictionLength = 6.5f;
+    // 2026-08-05 aggressive test (NOT part of the release): normal lead 12y; when the blade is
+    // within 8y of the player, the capsule extends to 40y ahead (both half-width 4.5f - blade
+    // body r4, 8y wide, +0.5y margin each side); the 5.5y AI body circle stays unchanged.
+    private const float PredictionLength = 12f;
     private readonly List<Actor> _blades = module.Enemies((uint)OID.AlabasterBlade);
     private readonly List<AOEInstance> _active = [with(8)];
 
@@ -69,11 +82,22 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
         {
             hints.AddForbiddenZone(AIShape, blade.Position);
             if (blade.LastFrameMovement.LengthSq() > 0.0001f)
-                hints.AddForbiddenZone(new SDCapsule(blade.Position, blade.LastFrameMovement.Normalized(), PredictionLength, 4.5f));
+            {
+                // Aggressive test build (NOT part of the release): normal lead 12y; once a blade
+                // comes within 8y of the player, extend to 40y ahead so the AI bails out early.
+                // While the central green zone is active (47536 read -> 47532), keep the capsule
+                // short (6y) so it never blocks the central entry and disable the 40y switch.
+                var zoneActive = Module.FindComponent<BladeDodgeZone>()?.HurricaneActive == true;
+                var length = zoneActive ? 6f : (blade.Position - actor.Position).Length() < 8f ? 40f : PredictionLength;
+                // While SpinningSweep (47541) is casting, soften the capsule (activation now+2s,
+                // G>0) so the AI can afford to cross it while bailing out of the cone; otherwise
+                // keep the default (MinValue -> now, hard block G=0) so blades are avoided.
+                var spinning = Module.FindComponent<SpinningSweep>() is { } sweep && sweep.Casters.Count != 0;
+                var activation = spinning ? WorldState.CurrentTime.AddSeconds(2d) : default;
+                hints.AddForbiddenZone(new SDCapsule(blade.Position, blade.LastFrameMovement.Normalized(), length, 4.5f), activation);
+            }
         }
 
-        if (live.Length != 0)
-            hints.GoalZones.Add(position => live.All(blade => !position.InCircle(blade.Position, 7f)) ? 10f : 0f);
     }
 
     private void AddBlade(Actor blade)
@@ -108,6 +132,9 @@ sealed class BladeDodgeZone(BossModule module) : BossComponent(module)
     private const float GoalWeight = 30f; // beats the other CE201 goal weights
 
     private bool _hurricaneActive; // set by 47536 cast start, cleared by 47532 cast start; the 47530 blade wave must NOT show the zone
+
+    // Exposed for UnbowedSpirit: shortens the movement capsule while the green zone is active.
+    public bool HurricaneActive => _hurricaneActive;
 
     private bool BladesActive => Module.Enemies((uint)OID.AlabasterBlade).Any(blade => !blade.IsDeadOrDestroyed);
 

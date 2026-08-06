@@ -40,6 +40,8 @@ public enum AID : uint
     Ability_7 = 49723, // TwoHeadedAevis->self, 3.0s cast, single-target
     Ability_Buffet = 49725, // Helper->self, no cast, ???
     Ability_Buffet1 = 49724, // Helper->self, no cast, ???
+    Ability_DecisiveClash = 49726, // GreenHead1/BlueHead1->self, 4.7s cast, 决战（开战，双头同步）
+    Ability_DecisiveClash1 = 49727, // TwoHeadedAevis->self, 4.7s cast, 决战（开战，本体）
     Ability_Summon = 47704, // GreenHead1/BlueHead1->self, 3.0s cast, single-target
     Ability_8 = 47705, // TwoHeadedAevis->self, 3.0s cast, single-target
     Ability_9 = 47643, // TwoHeadedAevis->self, 7.4s cast, single-target
@@ -52,6 +54,7 @@ public enum AID : uint
     Ability_HypothermalCombustion = 47707, // SwirlingOrb->self, 2.0s cast, range 15 circle
     Ability_Shock = 47706, // BallLightning->self, 2.0s cast, range 15 circle
     Ability_10 = 47656, // TwoHeadedAevis->self, 5.3s cast, single-target
+    Ability_Blazeloop4 = 47655, // TwoHeadedAevis->self, 5.0s cast, 冰焰凝环（本体，与 47654/47661/47662 同组，回放实测）
     Ability_Blaze = 47659, // BlueHead2->location, 6.0s cast, single-target
     Ability_Blaze1 = 50703, // Helper->location, 6.0s cast, range 5 circle
     Ability_Blazeloop = 47654, // BlueHead1->self, 6.0s cast, single-target

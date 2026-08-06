@@ -481,6 +481,13 @@ sealed class ChainSchedule(BossModule module) : BossComponent(module)
 sealed class ChainSafeGuide(BossModule module) : BossComponent(module)
 {
     private const float PrepRadius = 4f, GuideRadius = 1f, SpotDist = 18f, PrepWeight = 20f, GuideWeight = 30f;
+    // Kicker: when the Nth instruction resolves, the old green-circle spot becomes a max-urgency
+    // forbidden zone (activation=now -> G=0) for 0.5s, driving the AI out of the spot at once
+    // (interrupting greedy casts) while the guide moves on to the next spot.
+    private const float KickerRadius = 1.5f;
+    private WPos? _kickSpot;
+    private DateTime _kickUntil;
+    private bool _kickHadCast; // player was casting last frame while the kick zone was active
     private readonly HashSet<uint> _seenSequences = [];
     private bool _preparing;
     private int _resolved;
@@ -509,6 +516,14 @@ sealed class ChainSafeGuide(BossModule module) : BossComponent(module)
         {
             if (spell.GlobalSequence != 0 && !_seenSequences.Add(spell.GlobalSequence))
                 return;
+            // The resolved spot becomes a max-urgency kicker for 0.5s: the AI must leave it at
+            // once (activation=now -> G=0), interrupting greedy casts, while the guide moves on.
+            // No kick after the third resolution - the fourth spot has no next stop to rush to.
+            if (_resolved < 3 && SafeSpot(_resolved) is { } oldSpot)
+            {
+                _kickSpot = oldSpot;
+                _kickUntil = WorldState.CurrentTime.AddSeconds(0.5d);
+            }
             ++_resolved;
         }
     }
@@ -607,6 +622,27 @@ sealed class ChainSafeGuide(BossModule module) : BossComponent(module)
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        // Kicker zone: the old green-circle spot is hard-forbidden (activation=now -> G=0) for
+        // 0.5s, so the AI abandons it immediately even mid-cast. It ends early once the AI is
+        // actually gone (outside the zone) or its cast was broken (casting last frame, not now),
+        // so the path to the next green circle is not detoured around the fading zone. The 0.5s
+        // deadline remains the fallback for idle players (standing still, no cast to break).
+        var now = WorldState.CurrentTime;
+        if (_kickSpot is { } spot)
+        {
+            var casting = actor.CastInfo != null;
+            var castBroken = _kickHadCast && !casting;
+            var leftZone = (actor.Position - spot).Length() > KickerRadius + 0.5f;
+            if (castBroken || leftZone)
+                _kickUntil = now; // kick done - zone vanishes this frame
+            _kickHadCast = casting;
+            if (now < _kickUntil)
+                hints.AddForbiddenZone(new AOEShapeCircle(KickerRadius).Distance(spot, default), now);
+        }
+        else
+        {
+            _kickHadCast = false;
+        }
         if (_preparing)
             hints.GoalZones.Add(AIHints.GoalSingleTarget(Arena.Center, PrepRadius, PrepWeight));
         if (_resolved < 3 && SafeSpot(_resolved) is { } target)

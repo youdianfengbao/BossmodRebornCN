@@ -237,16 +237,21 @@ sealed class IceBreathSequence(BossModule module) : Components.GenericAOEs(modul
         => _pending.RemoveAll(entry => entry.AOE.ActorID == actorID);
 }
 
-sealed class IceRoar(BossModule module) : Components.SimpleAOEs(module, (uint)AID.IceRoar, new AOEShapeCircle(12f));
-// Every ice orb draws a faint 8y circle so the player can see its position and burst range
-// before the IceBreath cone reaches it; display only - never risky, no AI hints.
-sealed class IceOrbTracker(BossModule module) : BossComponent(module)
+// 小冰钢铁: IceOrb 的 IceRoar 只有 0.7-1.0s 读条, SimpleAOEs 显示太晚 (<1s 走位)。
+// 改为从 IceOrb 实体实时画 12y 圈, 球一出现就提前显示。
+sealed class IceRoar(BossModule module) : Components.GenericAOEs(module)
 {
-    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    private static readonly AOEShapeCircle Shape = new(12f);
+    private readonly List<AOEInstance> _displayed = [with(8)];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
+        _displayed.Clear();
         foreach (var orb in Module.Enemies((uint)OID.IceOrb))
             if (!orb.IsDeadOrDestroyed)
-                Arena.ZoneCircleOutline(orb.Position, 8f, Colors.AOE, 2f);
+                _displayed.Add(new(Shape, orb.Position, color: Colors.Danger, actorID: orb.InstanceID,
+                    shapeDistance: Shape.Distance(orb.Position, default)));
+        return CollectionsMarshal.AsSpan(_displayed);
     }
 }
 sealed class ChaoticChorus(BossModule module) : Components.SimpleAOEs(module, (uint)AID.ChaoticChorus, new AOEShapeCircle(6f));
@@ -279,7 +284,6 @@ sealed class RegnantChimeraStates : StateMachineBuilder
             .ActivateOnEnter<IceBreathSequence>()
             .ActivateOnEnter<Duobreath>()
             .ActivateOnEnter<IceRoar>()
-            .ActivateOnEnter<IceOrbTracker>()
             .ActivateOnEnter<ChaoticChorus>()
             .ActivateOnEnter<RamsVoice>()
             .ActivateOnEnter<DragonsVoice>();

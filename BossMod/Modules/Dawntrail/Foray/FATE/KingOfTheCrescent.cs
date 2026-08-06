@@ -23,7 +23,8 @@ public enum AID : uint
     FeatherRain = 41390 // Helper->location, 4.0s cast, range 11 circle
 }
 
-sealed class GlidingSwoop(BossModule module) : Components.SimpleAOEs(module, (uint)AID.GlidingSwoop, 25f);
+// 解包 41387: CastType=2, EffectRange=50 -> boss 脚下 50y 危险圈 (之前画 25y 导致 AI 站 25~50 被打)。
+sealed class GlidingSwoop(BossModule module) : Components.SimpleAOEs(module, (uint)AID.GlidingSwoop, 50f);
 sealed class BitingScratch(BossModule module) : Components.SimpleAOEs(module, (uint)AID.BitingScratch, new AOEShapeCone(40f, 45f.Degrees()));
 sealed class AeroIV(BossModule module) : Components.RaidwideCast(module, (uint)AID.AeroIV);
 sealed class FeatherRain(BossModule module) : Components.SimpleAOEs(module, (uint)AID.FeatherRain, 11f);

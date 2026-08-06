@@ -112,10 +112,12 @@ sealed class WindBoundary(BossModule module) : Components.GenericAOEs(module)
             _galeActive = false;
     }
 
-    // Upstream 7.5.5.22 addition absorbed: draw the kill-ring outline so the electric fence reads
-    // clearly on the radar; independent of the GaleBlade gap logic above.
+    // Upstream 7.5.5.22 addition absorbed (2026-08-05 user request): fill the band between the
+    // kill-ring (23.5y) and the arena rim (25y, ArenaBoundsCircle radius) so the deathwall reads
+    // as a solid ring on the radar instead of a thin outline; independent of the GaleBlade gap
+    // logic above.
     public override void DrawArenaBackground(int pcSlot, Actor pc)
-        => Arena.ZoneCircleOutlineUnclipped(Arena.Center, 23.5f, Colors.Danger, 2f);
+        => Arena.ZoneDonut(Arena.Center, 23.5f, 25f, Colors.Danger);
 }
 
 sealed class KidnapperAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
@@ -170,7 +172,6 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
     private const float InnerRing = 12f;
     private const float RingThreshold = 16f;
     private const float ContactRadius = 4.5f;
-    private static readonly Angle TrackHalfAngle = 15f.Degrees(); // 30 degrees of track ahead of the storm (half-angle 15 deg)
     // 2026-08-03: re-anchor threshold widened 3y -> 5y. The R20 ring storms move at ~3.0y/s, so
     // the per-second position packets step ~3y - exactly the old 3y threshold - which re-anchored
     // every packet and hard-cut StartPos/StartTime, making RendingWindTelegraphs' Predict(activation)
@@ -181,8 +182,14 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
     private const float DetectMoveSq = 1f; // 1y of first MOVE displacement is enough to measure the turn direction
     private const double MinDirectionDt = 1d; // require at least 1s between registration and the first MOVE
     private static readonly AOEShapeCircle Shape = new(ContactRadius);
-    private static readonly AOEShapeDonutSector OuterTrack = new(OuterRing - ContactRadius, OuterRing + ContactRadius, TrackHalfAngle);
-    private static readonly AOEShapeDonutSector InnerTrack = new(InnerRing - ContactRadius, InnerRing + ContactRadius, TrackHalfAngle);
+    // Forward arc capsule anchored to the storm body's live position (2026-08-06 user request):
+    // sweeps +/- 15 deg along the measured turn direction instead of the old center-anchored
+    // donut-sector track, so the warning reads as a leading arc that never misaligns with the
+    // body circle. AngularLength/OrbitCenter are ctor-only (rotation is ignored at draw time),
+    // so each turn direction needs its own instance; the orbit center must come from the module
+    // ctor parameter, because a field initializer runs before the base-class Module property.
+    private readonly AOEShapeArcCapsule _fwdArc = new(ContactRadius, 15f.Degrees(), module.Arena.Center);
+    private readonly AOEShapeArcCapsule _revArc = new(ContactRadius, -15f.Degrees(), module.Arena.Center);
     private readonly List<AOEInstance> _displayed = [with(16)];
 
     public readonly record struct MotionInfo(WPos StartPos, DateTime StartTime, float RingRadius, float AngularSpeed, float Sign)
@@ -259,15 +266,12 @@ sealed class HurricaneHazards(BossModule module) : Components.GenericAOEs(module
             // the storm body itself is the contact AOE
             _displayed.Add(new(Shape, hurricane.Position, actorID: hurricane.InstanceID,
                 shapeDistance: Shape.Distance(hurricane.Position, default)));
-            // the arc of track it is about to sweep through (pairs live 50-65s, so stale registrations are simply not drawn)
-            if (_motion.TryGetValue(hurricane.InstanceID, out info) && now <= info.StartTime.AddSeconds(70d))
-            {
-                var angle = Angle.FromDirection(info.Predict(center, now) - center);
-                var rot = angle + info.Sign * TrackHalfAngle;
-                var track = info.RingRadius >= RingThreshold ? OuterTrack : InnerTrack;
-                _displayed.Add(new(track, center, rot, actorID: hurricane.InstanceID,
-                    shapeDistance: track.Distance(center, rot)));
-            }
+            // forward arc capsule: the live body position is the arc start, swept +/- 15 deg along
+            // the measured turn direction; same refresh rhythm as the body circle right above, so
+            // the two move as one and never misalign (rotation is ignored by ArcCapsule)
+            var arc = info.Sign >= 0f ? _fwdArc : _revArc;
+            _displayed.Add(new(arc, hurricane.Position, default, actorID: hurricane.InstanceID,
+                shapeDistance: arc.Distance(hurricane.Position, default)));
         }
         return CollectionsMarshal.AsSpan(_displayed);
     }
@@ -328,19 +332,27 @@ sealed class HurricaneKnockbacks(BossModule module) : Components.GenericKnockbac
     }
 }
 
-// ICON 506 on a hurricane telegraphs its RendingWind cross ~4.1s before the cast starts, and the
-// storm keeps orbiting in between (up to 13y of travel), so the landing spot is extrapolated from
-// the registered circular motion. The icon entry only records the deadline; every frame the landing
-// spot is recomputed from HurricaneHazards' current motion data, so once the measured turn
-// direction replaces the default (first MOVE), an already-drawn wrong prediction is redrawn
-// automatically. The cast itself is still drawn by KidnapperAOEs; the predicted entry is dropped
-// as soon as the cast starts so the two never duplicate.
+// ICON 506 on a hurricane telegraphs its RendingWind cross ~4.1s before the cast starts. The
+// landing spot is the storm position at the effect moment, computed ONCE from a snapshot taken at
+// the icon moment: icon position rotated around the arena center by (measured direction x the
+// ring's fixed landing angle). Because the spot never depends on per-frame extrapolation, it can
+// never jump as HurricaneHazards re-anchors. The cast itself is still drawn by KidnapperAOEs; the
+// predicted entry is dropped as soon as the cast starts so the two never duplicate.
 sealed class RendingWindTelegraphs(BossModule module) : Components.GenericAOEs(module)
 {
     private const float PredictionTime = 4.1f;
     private const uint TelegraphIcon = 506u;
-    private static readonly AOEShapeCross Cross = new(60f, 4f);
-    private readonly List<(ulong ActorID, DateTime Activation)> _icons = [];
+    // Fixed landing angles (degrees), replay-measured 2026-08-06 from 21 events / 4 encounter
+    // instances (TextVerbose_2026_08_06_00_10_22.log + TextVerbose_2026_08_02_10_55_27.log):
+    // ICON->effect total angular travel = 40.24 deg +/- 0.46 on the R20 ring and 34.74 +/- 0.63
+    // on the R12 ring (arc error +/- 0.16y / +/- 0.13y). The values already include the cast-window
+    // deceleration segment (2.48 deg on both rings), so the cross lands on the real effect spot.
+    private const float OuterLandingAngle = 40.2f;
+    private const float InnerLandingAngle = 34.7f;
+    private const float RingThreshold = 16f;
+    // half-width 4f + 0.2f margin covers the measured landing-spot error
+    private static readonly AOEShapeCross Cross = new(60f, 4.2f);
+    private readonly List<(ulong ActorID, DateTime Activation, WPos IconPos, float IconRadius, float Sign)> _icons = [];
     private readonly List<AOEInstance> _displayed = [with(8)];
 
     public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
@@ -349,7 +361,13 @@ sealed class RendingWindTelegraphs(BossModule module) : Components.GenericAOEs(m
             return;
         // a fresh icon overrides any previous prediction for the same storm
         _icons.RemoveAll(e => e.ActorID == actor.InstanceID);
-        _icons.Add((actor.InstanceID, WorldState.FutureTime(PredictionTime)));
+        // snapshot: icon position, ring radius, and the measured turn direction (random per
+        // encounter, so it must come from HurricaneHazards, never hardcoded)
+        var center = Module.Arena.Center;
+        var radius = (actor.Position - center).Length();
+        var sign = Module.FindComponent<HurricaneHazards>()?.TryGetMotion(actor.InstanceID, out var motion) == true
+            ? motion.Sign : radius >= RingThreshold ? 1f : -1f;
+        _icons.Add((actor.InstanceID, WorldState.FutureTime(PredictionTime), actor.Position, radius, sign));
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
@@ -363,7 +381,6 @@ sealed class RendingWindTelegraphs(BossModule module) : Components.GenericAOEs(m
     {
         _displayed.Clear();
         var now = WorldState.CurrentTime;
-        var hazards = Module.FindComponent<HurricaneHazards>();
         for (var i = _icons.Count - 1; i >= 0; --i)
         {
             var entry = _icons[i];
@@ -372,10 +389,11 @@ sealed class RendingWindTelegraphs(BossModule module) : Components.GenericAOEs(m
                 _icons.RemoveAt(i);
                 continue;
             }
-            // pull the current motion data every frame so a direction fix is picked up immediately
-            if (hazards is not { } h || !h.TryGetMotion(entry.ActorID, out var motion))
-                continue;
-            var pos = motion.Predict(Module.Arena.Center, entry.Activation);
+            // fixed landing spot: icon position rotated around the arena center by the measured
+            // turn direction times the ring's constant landing angle (same angle convention as
+            // HurricaneHazards.MotionInfo.Predict, so Sign semantics match by construction)
+            var angle = Angle.FromDirection(entry.IconPos - Module.Arena.Center) + entry.Sign * (entry.IconRadius >= RingThreshold ? OuterLandingAngle : InnerLandingAngle).Degrees();
+            var pos = Module.Arena.Center + entry.IconRadius * angle.ToDirection();
             // the two fixed rotations form the eight-way cross pattern
             var rot = (-180f).Degrees();
             _displayed.Add(new(Cross, pos, rot, entry.Activation, actorID: entry.ActorID,
@@ -481,11 +499,18 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
     // the AI off the outer rim (landings up to 24.5y are actually safe now).
     private const float SafeRadius = 24.5f;
     // Upstream knockback-destination safety: DestinationUnsafe rejects landings beyond
-    // LethalRadius (kept at the re-measured wall, 24.5f); PreferredStart biases the AI's start
-    // position toward the wall so the push lands it centrally.
+    // LethalRadius (kept at the re-measured wall, 24.5f).
     private const float LethalRadius = 24.5f;
-    private const float PreferredStartDistance = 20.5f;
-    private const float PreferredStartRadius = 2f;
+    // Upwind guidance (2026-08-06 user request): a big weak goal zone upwind of the arena center
+    // so the AI walks upwind and lands mid-arena after the 24y push instead of idling in the safe
+    // middle. All points inside (r 15.5-22.5 along the push direction, +/-8y across) land within
+    // ~9.4y of center; weight 8 sits above CenterBias (5, suppressed during gusts) and below the
+    // GaleBlade gap goal (25).
+    private const float UpwindDistance = 19f;
+    private const float UpwindHalfLength = 3.5f;
+    private const float UpwindHalfWidth = 8f;
+    private const float UpwindGoalWeight = 8f;
+    private static readonly AOEShapeRect UpwindRect = new(UpwindHalfLength, UpwindHalfWidth, UpwindHalfLength); // center-symmetric
     // Landing on a hurricane is lethal: the storm body is a 4.5y contact AOE, add the player
     // half-width and a small margin -> 6y danger radius around each storm's predicted position.
     private const float HurricaneLandingRadius = 6f;
@@ -493,6 +518,9 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
     // old 1.05s estimate scheduled the safe-edge constraint roughly 0.4s after the real knockback.
     private const double HitDelay = 0.60d;
     private readonly List<Knockback> _casters = [with(2)];
+    // true while a gust telegraph is active - CenterBias checks this to suppress the center goal
+    // during gusts so the upwind rect is the only weak goal the AI follows
+    public bool AnyActive => _casters.Count > 0;
 
     // Each hurricane's position at the given time, extrapolated from its measured circular motion.
     private IEnumerable<WPos> HurricanePositionsAt(DateTime time)
@@ -521,8 +549,9 @@ sealed class GustKnockback(BossModule module) : Components.GenericKnockback(modu
             var displacement = Distance * kb.Direction.ToDirection();
             var center = Arena.Center;
             hints.AddForbiddenZone(new SDKnockbackInCircleFixedDirection(center, displacement, SafeRadius), kb.Activation);
-            var preferredStart = center - PreferredStartDistance * kb.Direction.ToDirection();
-            hints.GoalZones.Add(position => position.InCircle(preferredStart, PreferredStartRadius) ? 5f : 0f);
+            // big weak upwind goal: the AI walks upwind so the push lands it mid-arena
+            var upwindCenter = center - UpwindDistance * kb.Direction.ToDirection();
+            hints.GoalZones.Add(position => UpwindRect.Check(position, upwindCenter, kb.Direction) ? UpwindGoalWeight : 0f);
             // Landings on a hurricane are lethal too: forbid each storm's predicted position at
             // the knockback time so the AI plans around it (unknown motion is skipped).
             foreach (var stormPos in HurricanePositionsAt(kb.Activation))
@@ -590,7 +619,13 @@ sealed class CenterBias(BossModule module) : BossComponent(module)
     private const float Weight = 5f;
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
-        => hints.GoalZones.Add(AIHints.GoalSingleTarget(Arena.Center, Radius, Weight));
+    {
+        // during a gust the upwind rect (weight 8) must be the only weak goal: suppress the
+        // center bias so the AI does not idle in the safe middle instead of walking upwind
+        if (Module.FindComponent<GustKnockback>()?.AnyActive == true)
+            return;
+        hints.GoalZones.Add(AIHints.GoalSingleTarget(Arena.Center, Radius, Weight));
+    }
 }
 
 // B94C resolves into the BBF8 helper raidwide about 0.9s after the boss cast. BC7A similarly

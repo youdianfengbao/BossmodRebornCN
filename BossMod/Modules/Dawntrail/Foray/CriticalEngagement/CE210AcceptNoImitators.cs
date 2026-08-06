@@ -289,20 +289,21 @@ sealed class DarkDealing(BossModule module) : Components.SingleTargetDelayableCa
 // order (immune to activation-estimate drift - the old time-based removal lagged a segment by
 // one round); after the last 48344 the final segment (no 48344 of its own) expires one dash
 // interval later, exactly when that dash resolves. 48344 refines per-segment only when the
-// chain failed to build. Risk grading by activation window: segments resolving within ~2.5s are
-// danger, the rest preview - but ALL segments are forbidden ground for the AI.
+// chain failed to build. Risk grading by activation window: the earliest undashed segment turns
+// danger 2.2s before landing (DisplayLead, absorbed from upstream .27 time-driven idea), the
+// rest preview - but ALL undashed segments are forbidden ground for the AI.
 sealed class HellwardBoundDashes(BossModule module) : Components.GenericAOEs(module)
 {
     private const float HalfWidth = 5f;
     private const double FirstDashDelay = 2.2d; // CST! -> first dash (replay-measured 2.2-2.23s)
     private const double DashInterval = 2.25d; // segment spacing (replay ~2.25s), staggers activations
     private const double DashLifetime = 0.5d; // fallback margin only - segments are dropped by 48344 in order (was 2.5s, left the last one ~3s extra)
-    // Covers the whole 4-segment chain (~9s): during the telegraph (cast start to first dash,
-    // ~8.1s) all four rectangles show the danger marker; AI forbidden zones already cover every
-    // segment, activation weights still make nearer segments more urgent.
-    private const double RiskWindow = 9d;
+    // 每段落地前 DisplayLead 秒进入紧迫 (深黄): 段时长回放实测 2.2~2.25s, 落地前 2.2s 变深黄
+    // 即"段开始即深黄"; 吸收上游 .27 纯时间驱动节点思路 (2026-08-06)。
+    private const double DisplayLead = 2.2d;
     private const float ArrowMatchAngle = 30f; // degrees: the next arrow must lie within this of the heading
     private readonly List<AOEInstance> _dashes = [];
+    private readonly List<AOEInstance> _displayed = new(4); // ActiveAOEs 过滤后的显示列表 (仅未落地段)
     private readonly List<(WPos Position, Angle Rotation)> _arrows = [with(4)]; // 0x1EC09B dash-direction arrows
     private WPos _bossPos; // 48343 caster position = chain head reference
     private WPos _diveStartLoc; // 48343's location field = first dash start (fallback)
@@ -315,35 +316,43 @@ sealed class HellwardBoundDashes(BossModule module) : Components.GenericAOEs(mod
     {
         PruneExpired();
         TryBuildChain();
-        var dashes = CollectionsMarshal.AsSpan(_dashes);
-        var count = dashes.Length;
-        // Risk by activation window: the segment resolving within ~2.5s (current + next dash) is
-        // danger, farther ones are translucent preview.
-        var riskyDeadline = WorldState.CurrentTime.AddSeconds(RiskWindow);
-        for (var i = 0; i < count; ++i)
+        var now = WorldState.CurrentTime;
+        // 消失由事件驱动: 48344 位移到位事件顺序移除 _dashes (段 1/2/3 到位即从显示消失,
+        // 回放确认 48344 caster pos = 本段终点), 段 4 由 48344#3 到达时的 activation 补丁
+        // 校准; PruneExpired (DashLifetime=0.5s) 兜底防事件缺失残留。显示列表 = _dashes 全部段。
+        _displayed.Clear();
+        var minActivation = DateTime.MaxValue;
+        foreach (var aoe in _dashes)
         {
-            ref var aoe = ref dashes[i];
-            if (aoe.Activation <= riskyDeadline)
-            {
-                aoe.Color = Colors.Danger;
-                aoe.Risky = true;
-            }
-            else
-            {
-                aoe.Color = Colors.AOE;
-                aoe.Risky = false;
-            }
+            _displayed.Add(aoe);
+            if (aoe.Activation < minActivation)
+                minActivation = aoe.Activation;
         }
-        return dashes;
+        // 紧迫性: 未落地段中 activation 最小的一段 (最接近落地的一跳) 在其落地前 DisplayLead
+        // 秒内变深黄; 第一段 (activation ≈ _firstDashAt, 容差 0.1s) 例外 - 从链建立起恒深黄,
+        // 用户要求读条期就显示首冲方向。其余未落地段为淡黄预览。用"activation 最小"而非
+        // 独立窗口, 避免段间隔 (2.25s) 与紧迫窗口 (2.2s) 重叠导致两段同时深黄。
+        var isFirst = _displayed.Count != 0 && Math.Abs((minActivation - _firstDashAt).TotalSeconds) < 0.1d;
+        var urgent = _displayed.Count != 0 && (isFirst || now >= minActivation.AddSeconds(-DisplayLead));
+        foreach (ref var aoe in CollectionsMarshal.AsSpan(_displayed))
+        {
+            aoe.Color = urgent && aoe.Activation == minActivation ? Colors.Danger : Colors.AOE;
+            aoe.Risky = urgent && aoe.Activation == minActivation;
+        }
+        return CollectionsMarshal.AsSpan(_displayed);
     }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        // Every dash rectangle is forbidden ground for the AI - the whole path is lethal while
-        // each dash resolves (including the translucent preview segments, not just the danger
-        // window ones).
-        foreach (var aoe in ActiveAOEs(slot, actor))
+        // 全程所有未落地段都是 AI 禁飞区 (与显示窗口/紧迫分级解耦, 不经过 ActiveAOEs 过滤);
+        // 落地段立即解封 (48344 顺序移除 + PruneExpired 负责列表清理)。
+        var now = WorldState.CurrentTime;
+        foreach (var aoe in _dashes)
+        {
+            if (now >= aoe.Activation)
+                continue;
             hints.AddForbiddenZone(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation), aoe.Activation);
+        }
     }
 
     public override void Update()
@@ -354,7 +363,9 @@ sealed class HellwardBoundDashes(BossModule module) : Components.GenericAOEs(mod
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID != (uint)AID.HellwardBound || spell.EventHappened)
+        // AIE+ 客户端下 BCD7 可能带 EventHappened 到达, 但目标点/时刻仍有效, 不滤 (上游 .27 同样
+        // 不过滤) - 保证 cast 数据 fallback (_diveStartLoc/_firstDashAt) 始终可用。
+        if (spell.Action.ID != (uint)AID.HellwardBound)
             return;
         // New round: reset everything, then build the chain from the freshly spawned arrows (they
         // arrive around the cast start, so TryBuildChain retries in Update until they are there).
