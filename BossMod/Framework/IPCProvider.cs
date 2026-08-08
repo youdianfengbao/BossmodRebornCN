@@ -177,6 +177,9 @@ sealed class IPCProvider : IDisposable
         // --- Custom OmniDuty Endpoints ---
         Register("Hints.MaxCastTime", () => hints.MaxCastTime);
         Register("Hints.ForceCancelCast", () => hints.ForceCancelCast);
+        Register("Hints.ForceCancelCastAI", () => ai.Controller.ForceCancelCast); // AEAssist 联动（2026-08-09 逆向 NiGuangOwO 7.5.5.36 复刻）：AI 控制器侧强制取消读条
+        Register("Movement.IsMoving", () => hints.ForcedMovement.HasValue); // AEAssist 联动（2026-08-09 逆向复刻）：有强制移动方向视为移动中
+        Register("Movement.IsMoveRequested", movement.IsMoveRequested); // AEAssist 联动（2026-08-09 逆向复刻）：玩家是否请求了移动
         Register("Hints.ForbiddenZonesCount", () => hints.ForbiddenZones.Count);
         Register("Hints.ForbiddenZonesNextActivation", () => hints.ForbiddenZones.Count == 0 ? float.MaxValue : (float)(hints.ForbiddenZones[0].activation - DateTime.Now).TotalSeconds);
         Register("Hints.ArenaCenter", () => new Vector2(hints.PathfindMapCenter.X, hints.PathfindMapCenter.Z));

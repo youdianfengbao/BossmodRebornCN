@@ -73,11 +73,13 @@ public enum AID : uint
 
     // 回旋扇形：Helper 在场地中心放扇形（回旋剑 4D77 只做动画），读条 3.5s，方向随剑位置变化
     Turn1 = 49575, // 0xC1A7 DancingSword5->self, 3.5s cast, Fan 90° R14 回旋扇形
-    Turn2 = 49577, // 0xC1A9 DancingSword5->self, 3.5s cast, Fan 65° R19 回旋扇形
-    Turn5 = 49578, // 0xC1AA DancingSword5->self, 3.5s cast, Fan 57° R24 回旋扇形（秘法剑回合）
+    Turn2 = 49577, // 0xC1A9 DancingSword5->self, 3.5s cast, Fan 90° R24 回旋扇形（2026-08-07 回放查证修正）
+    Turn5 = 49578, // 0xC1AA DancingSword5->self, 3.5s cast, Fan 65° R14 回旋扇形（2026-08-07 回放查证修正）
     Turn7 = 49580, // 0xC1AC DancingSword5->self, 3.5s cast, Fan 54° R24 回旋扇形（秘法剑回合，回放补充）
-    Turn8 = 49883, // 0xC2DB DancingSword5->self, 3.5s cast, 回旋扇形（秘法剑回合，回放补充）
-    Turnabout = 49889, // 0xC2E1 DancingSword5->self, 3.5s cast, range ?-24 donut 回旋扇形（秘法剑回合，回放补充）
+    Turn8 = 49883, // 0xC2DB DancingSword5->self, 3.5s cast, Fan 65° R14 回旋扇形（秘法剑回合，2026-08-07 回放查证修正）
+    Turnabout = 49889, // 0xC2E1 DancingSword5->self, 3.5s cast, Fan 90° R24 回旋扇形（秘法剑回合，2026-08-07 回放查证修正）
+    TurnFan90R19 = 49576, // 0xC1A8 DancingSword5->self, 3.5s cast, Fan 90° R19（ACT 表有、回放零出现，兜底）
+    TurnFan57R19 = 49579, // 0xC1AB DancingSword5->self, 3.5s cast, Fan 57° R19（ACT 表有、回放零出现，兜底）
 
     // 回旋剑动画（4D77 剑施放，无玩家伤害，无需绘制）
     Turn = 49563, // 0xC1AB DancingSword4->location, 3.5s cast, 回旋动画

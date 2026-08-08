@@ -13,6 +13,7 @@ public sealed class AIHintsBuilder : IDisposable
     private readonly ZoneModuleManager _zmm;
     private readonly EventSubscriptions _subscriptions;
     private readonly RotationSolverRebornModule? _rsr;
+    private readonly AEAssistModule? _ae;
     private readonly Dictionary<ulong, (Actor Caster, Actor? Target, AOEShape Shape, bool IsCharge)> _activeAOEs = [];
     private readonly Dictionary<ulong, (Actor Caster, Actor? Target, AOEShape Shape)> _activeGazes = [];
     private readonly List<Actor> _invincible = [];
@@ -32,12 +33,13 @@ public sealed class AIHintsBuilder : IDisposable
     private static readonly ActionTweaksConfig _config = Service.Config.Get<ActionTweaksConfig>();
     private static readonly Dictionary<uint, (byte, byte, byte, uint, string, string, string, int, bool, uint)> _spellCache = [];
 
-    public AIHintsBuilder(WorldState ws, BossModuleManager bmm, ZoneModuleManager zmm, RotationSolverRebornModule? rsr)
+    public AIHintsBuilder(WorldState ws, BossModuleManager bmm, ZoneModuleManager zmm, RotationSolverRebornModule? rsr, AEAssistModule? ae)
     {
         _ws = ws;
         _bmm = bmm;
         _zmm = zmm;
         _rsr = rsr;
+        _ae = ae;
         Obstacles = new(ws);
         _subscriptions = new
         (
@@ -97,9 +99,13 @@ public sealed class AIHintsBuilder : IDisposable
             }
         }
         hints.Normalize();
+        // RSRDesiredPositional 优先级（2026-08-09 逆向 NiGuangOwO 7.5.5.36 复刻）：
+        // RSR 已装且身位需求非 Any → 用 RSR 身位；否则 AEAssist 已装 → 用 AEAssist 身位；都没有 → Any
+        var rsrPos = _rsr?.IsInstalled == true ? _rsr.DesiredPositional : Positional.Any;
+        var aePos = _ae?.IsInstalled == true ? _ae.DesiredPositional : Positional.Any;
+        hints.RSRDesiredPositional = rsrPos != Positional.Any ? rsrPos : aePos;
         if (_rsr != null)
         {
-            hints.RSRDesiredPositional = _rsr.IsInstalled ? _rsr.DesiredPositional : Positional.Any;
             var now = _ws.CurrentTime;
             var soon = now.AddSeconds(0.75d);
             var hasForbiddenDirection = hints.ForbiddenDirections.Count > 0;

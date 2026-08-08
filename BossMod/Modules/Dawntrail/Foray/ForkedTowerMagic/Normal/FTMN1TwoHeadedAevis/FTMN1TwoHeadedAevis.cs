@@ -32,12 +32,30 @@ public sealed class TwoHeadedAevis : BossModule
     public TwoHeadedAevis(WorldState ws, Actor primary) : base(ws, primary, new(-900f, 700f), new ArenaBoundsSquare(20f))
     {
         ActivateComponent<BlazeGuide>(); // 钢铁月环绿圈引导（KeepOnPhaseChange，跨相位常驻）
+        ActivateComponent<WeakGuide>(); // 弱引导矩形（KeepOnPhaseChange，跨相位常驻）
     }
 
     protected override bool CheckPull() => PrimaryActor.InCombat && (PrimaryActor.IsTargetable || IsAnyActorTargetable((uint)OID.GreenHead1) || IsAnyActorTargetable((uint)OID.BlueHead1));
 }
 
 // ==================== 组件（形状/时机均来自 2026-08-06 三场回放实测） ====================
+
+// 弱引导矩形（2026-08-07 用户实测）：对角 (-888.7,696.8)-(-910.7,687.1)，最弱正向引导，AI 无其他干扰时倾向进入
+sealed class WeakGuide(BossModule module) : BossComponent(module)
+{
+    private static readonly WPos Center = new(-899.7f, 691.95f); // x 中心 -899.7（半宽 11）、z 中心 691.95（半宽 4.85）
+    private const float HalfX = 11f; // x ∈ [-910.7, -888.7]
+    private const float HalfZ = 4.85f; // z ∈ [687.1, 696.8]
+
+    public override bool KeepOnPhaseChange => true; // 常驻弱引导
+
+    // 最弱正向引导（weight 0.1，先例 DeepDungeon GoalSingleTarget(_, 3, 0.1f)）：
+    // GoalZones 各得分相加，其他机制的强制目标（1f 及以上）会完全覆盖 0.1f，故仅无干扰时 AI 倾向进入矩形
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        hints.GoalZones.Add(p => Math.Abs(p.X - Center.X) <= HalfX && Math.Abs(p.Z - Center.Z) <= HalfZ ? 0.1f : 0f);
+    }
+}
 
 // 决战（开战全屏 AoE）：本体 49727 + 双头 49726 同步读条 4.7s，回放确认全屏无落点
 sealed class OpeningClash(BossModule module) : Components.RaidwideCast(module, (uint)AID.Ability_DecisiveClash1, "决战：全屏伤害");

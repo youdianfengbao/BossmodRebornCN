@@ -3,7 +3,7 @@
 // （ZoneID 1346 新月岛北部）。OID/AID/SID 枚举由 The Combat Reborn Team (LTS) 数据导入生成。
 namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN3Necrophobia;
 
-[ModuleInfo(BossModuleInfo.Maturity.Dummy, // boss3 恢复开发隐藏（2026-08-07：boss1 实测通过，boss3 待实测）
+[ModuleInfo(BossModuleInfo.Maturity.Dummy, // 发版隐藏（2026-08-09）
     StatesType = typeof(NecrophobiaStates),
     ConfigType = null, // 如需要可替换为 typeof(NecrophobiaConfig)
     ObjectIDType = typeof(OID),

@@ -51,6 +51,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
     private UIRotationWindow _wndRotation = null!;
     private MainDebugWindow _wndDebug = null!;
     private RotationSolverRebornModule _rsr = null!;
+    private AEAssistModule _ae = null!;
 
     public Plugin(IDalamudPluginInterface dalamud, ICommandManager commandManager, ISigScanner sigScanner, IDataManager dataManager)
     {
@@ -110,11 +111,12 @@ public sealed class Plugin : IAsyncDalamudPlugin
 
         var qpf = (ulong)FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance()->PerformanceCounterFrequency;
         _rsr = new(_dalamud);
+        _ae = new(_dalamud); // AEAssist 联动（2026-08-09 逆向 NiGuangOwO 7.5.5.36 复刻）：RSR 无身位需求时兜底
         _ws = new(qpf, _gameVersion);
         _hints = new();
         _bossmod = new(_ws);
         _zonemod = new(_ws);
-        _hintsBuilder = new(_ws, _bossmod, _zonemod, _rsr);
+        _hintsBuilder = new(_ws, _bossmod, _zonemod, _rsr, _ae);
         _movementOverride = new(_dalamud);
         _amex = new(_ws, _hints, _movementOverride);
         _wsSync = new(_ws, _amex);
@@ -170,6 +172,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
         _hintsBuilder.Dispose();
         _zonemod.Dispose();
         _bossmod.Dispose();
+        _ae.Dispose();
         _rsr.Dispose();
         CommandManager.RemoveHandler("/bmr");
         GarbageCollection();

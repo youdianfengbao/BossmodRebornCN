@@ -4,7 +4,7 @@
 // 数据导入生成。
 namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN4Index;
 
-[ModuleInfo(BossModuleInfo.Maturity.Dummy, // boss4 恢复开发隐藏（2026-08-07：boss1 实测通过，boss4 待实测）
+[ModuleInfo(BossModuleInfo.Maturity.Dummy, // 发版隐藏（2026-08-09）
     StatesType = typeof(IndexStates),
     ConfigType = null, // 如需要可替换为 typeof(IndexConfig)
     ObjectIDType = typeof(OID),
