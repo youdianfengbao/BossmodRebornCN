@@ -61,15 +61,7 @@ sealed class DarkSurgeTreads(BossModule module) : Components.GenericAOEs(module)
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.Contributed,
-    Contributors = "KanoNoUta",
-    PrimaryActorOID = (uint)OID.Necrophobia,
-    GroupType = BossModuleInfo.GroupType.TheForkedTowerMagic,
-    GroupID = 1017u,
-    NameID = 0u,
-    SortOrder = 3,
-    Category = BossModuleInfo.Category.Foray,
-    Expansion = BossModuleInfo.Expansion.Dawntrail)]
+// Extreme Forked Tower support is intentionally not registered for CN release builds.
 public sealed class Necrophobia : BossModule
 {
     public Necrophobia(WorldState ws, Actor primary) : base(ws, primary, new(100f, 789f), new ArenaBoundsSquare(25f))

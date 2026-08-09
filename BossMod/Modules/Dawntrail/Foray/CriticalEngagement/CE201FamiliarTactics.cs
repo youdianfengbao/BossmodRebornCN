@@ -48,19 +48,21 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
     private static readonly AOEShapeCircle AIShape = new(5.5f);
     private const float PredictionLength = 8f;
     private readonly List<Actor> _blades = module.Enemies((uint)OID.AlabasterBlade);
+    private readonly HashSet<ulong> _observedBladeIDs = [];
+    private readonly List<Actor> _liveHazards = [with(16)];
     private readonly List<AOEInstance> _active = [with(8)];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         _active.Clear();
-        foreach (var blade in _blades)
+        foreach (var blade in LiveHazards())
             AddBlade(blade);
         return CollectionsMarshal.AsSpan(_active);
     }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        var live = _blades.Where(blade => !blade.IsDeadOrDestroyed).ToArray();
+        var live = LiveHazards();
         foreach (var blade in live)
         {
             hints.AddForbiddenZone(AIShape, blade.Position);
@@ -70,6 +72,35 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
 
         if (live.Length != 0)
             hints.GoalZones.Add(position => live.All(blade => !position.InCircle(blade.Position, 7f)) ? 10f : 0f);
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        // The actual moving collision is emitted by OID 0x233C helpers in ARR, not only by the
+        // visible AlabasterBlade actors. Track only casters that have produced a real collision;
+        // unrelated helpers must never become false danger zones.
+        if (spell.Action.ID is (uint)AID.UnbowedSpirit or (uint)AID.Gale)
+            _observedBladeIDs.Add(caster.InstanceID);
+    }
+
+    public override void OnActorDeath(Actor actor) => _observedBladeIDs.Remove(actor.InstanceID);
+    public override void OnActorDestroyed(Actor actor) => _observedBladeIDs.Remove(actor.InstanceID);
+
+    private Actor[] LiveHazards()
+    {
+        _liveHazards.Clear();
+        var seen = new HashSet<ulong>();
+        foreach (var blade in _blades)
+        {
+            if (!blade.IsDeadOrDestroyed && seen.Add(blade.InstanceID))
+                _liveHazards.Add(blade);
+        }
+        foreach (var instanceID in _observedBladeIDs)
+        {
+            if (WorldState.Actors.Find(instanceID) is { } helper && !helper.IsDeadOrDestroyed && seen.Add(instanceID))
+                _liveHazards.Add(helper);
+        }
+        return _liveHazards.ToArray();
     }
 
     private void AddBlade(Actor blade)

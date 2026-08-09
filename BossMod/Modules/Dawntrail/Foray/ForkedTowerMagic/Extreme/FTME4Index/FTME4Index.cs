@@ -23,15 +23,7 @@ sealed class IndexAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
     };
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.Contributed,
-    Contributors = "KanoNoUta",
-    PrimaryActorOID = (uint)OID.Index,
-    GroupType = BossModuleInfo.GroupType.TheForkedTowerMagic,
-    GroupID = 1017u,
-    NameID = 0u,
-    SortOrder = 4,
-    Category = BossModuleInfo.Category.Foray,
-    Expansion = BossModuleInfo.Expansion.Dawntrail)]
+// Extreme Forked Tower support is intentionally not registered for CN release builds.
 public sealed class Index : BossModule
 {
     public Index(WorldState ws, Actor primary) : base(ws, primary, new(0f, -628f), new ArenaBoundsSquare(25f))

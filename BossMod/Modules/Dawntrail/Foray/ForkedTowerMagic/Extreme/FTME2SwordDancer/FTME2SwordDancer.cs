@@ -59,15 +59,7 @@ sealed class DancingSwordTelegraph(BossModule module) : Components.GenericAOEs(m
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.Contributed,
-    Contributors = "KanoNoUta",
-    PrimaryActorOID = (uint)OID.SwordDancer,
-    GroupType = BossModuleInfo.GroupType.TheForkedTowerMagic,
-    GroupID = 1017u,
-    NameID = 0u,
-    SortOrder = 2,
-    Category = BossModuleInfo.Category.Foray,
-    Expansion = BossModuleInfo.Expansion.Dawntrail)]
+// Extreme Forked Tower support is intentionally not registered for CN release builds.
 public sealed class SwordDancer : BossModule
 {
     public SwordDancer(WorldState ws, Actor primary) : base(ws, primary, new(600f, 704f), new ArenaBoundsSquare(25f))

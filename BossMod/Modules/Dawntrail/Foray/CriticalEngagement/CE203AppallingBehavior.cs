@@ -79,6 +79,7 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
     private DateTime _instructionFirstActivation;
     private bool? _instructionCircleFirst;
     private int _instructionTethers;
+    private bool _instructionReverse;
 
     private static AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
@@ -121,6 +122,20 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        // During Reverse Esoteric Instruction the four keepers have already been assigned and
+        // are moving to their swap destinations, but the first C271/C273 cast does not reveal
+        // polarity yet. Keep the AI in the central 5y safe cell until that first real cast;
+        // otherwise the generic melee target fallback leaves it stationary at the boss and it
+        // gets caught when the charge sequence starts.
+        if (_instructionReverse && _instructionCircleFirst == null && _instructionTethers > 0
+            && WorldState.CurrentTime <= _instructionFirstActivation)
+        {
+            // This is an immediate navigation constraint; the state/timeout above controls its
+            // lifetime. Passing the future activation here would leave the center fallback active
+            // until the first mechanic actually resolves.
+            hints.AddForbiddenZone(new AOEShapeDonut(5f, 40f), Arena.Center);
+        }
+
         foreach (ref readonly var aoe in ActiveAOEs(slot, actor))
         {
             // Hammer and learned instructions are ordered movement puzzles. Later previews are not
@@ -146,6 +161,7 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
             // 等第一个 BadBreath/Plaincracker 施法校准, 否则连线阶段会画出错误顺序的危险区.
             _instructionCircleFirst = null;
             var reverse = spell.Action.ID == (uint)AID.EsotericInstructionReverse;
+            _instructionReverse = reverse;
             _instructionFirstActivation = Module.CastFinishAt(spell, reverse ? 12.7d : 6.3d);
             return;
         }
@@ -240,6 +256,7 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
     private void CalibrateInstruction(bool circleFirst, DateTime firstActivation)
     {
         _instructionCircleFirst = circleFirst;
+        _instructionReverse = false;
         _instructionFirstActivation = firstActivation;
         for (var i = 0; i < _pending.Count; ++i)
         {

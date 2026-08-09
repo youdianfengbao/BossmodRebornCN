@@ -117,15 +117,7 @@ sealed class MahjongMechanics(BossModule module) : Components.GenericAOEs(module
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.Contributed,
-    Contributors = "KanoNoUta",
-    PrimaryActorOID = (uint)OID.TwoHeadedAevis,
-    GroupType = BossModuleInfo.GroupType.TheForkedTowerMagic,
-    GroupID = 1017u,
-    NameID = 0u,
-    SortOrder = 1,
-    Category = BossModuleInfo.Category.Foray,
-    Expansion = BossModuleInfo.Expansion.Dawntrail)]
+// Extreme Forked Tower support is intentionally not registered for CN release builds.
 public sealed class TwoHeadedAevis : BossModule
 {
     public TwoHeadedAevis(WorldState ws, Actor primary) : base(ws, primary, new(-900f, 700f), new ArenaBoundsSquare(20f))
