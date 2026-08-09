@@ -40,11 +40,11 @@ public sealed class TwoHeadedAevis : BossModule
 
 // ==================== 组件（形状/时机均来自 2026-08-06 三场回放实测） ====================
 
-// 弱引导矩形（2026-08-07 用户实测）：对角 (-888.7,696.8)-(-910.7,687.1)，最弱正向引导，AI 无其他干扰时倾向进入
+// 弱引导矩形（2026-08-07 用户实测）：对角 (-888,696.8)-(-912,687.1)，最弱正向引导，AI 无其他干扰时倾向进入
 sealed class WeakGuide(BossModule module) : BossComponent(module)
 {
-    private static readonly WPos Center = new(-899.7f, 691.95f); // x 中心 -899.7（半宽 11）、z 中心 691.95（半宽 4.85）
-    private const float HalfX = 11f; // x ∈ [-910.7, -888.7]
+    private static readonly WPos Center = new(-900f, 691.95f); // x 中心 -900（半宽 12，2026-08-09 用户调整）、z 中心 691.95（半宽 4.85）
+    private const float HalfX = 12f; // x ∈ [-912, -888]
     private const float HalfZ = 4.85f; // z ∈ [687.1, 696.8]
 
     public override bool KeepOnPhaseChange => true; // 常驻弱引导

@@ -602,6 +602,8 @@ public sealed class ArenaBoundsCustom : ArenaBounds
         }
 
         // 可选显式中心：多边形整体平移到指定中心（保持世界坐标几何不变）
+        // 3 平台偏移修复（2026-08-09 用户实测）：顶点在上面已减自动 center 转局部系，
+        // 此处应再减 shift 使局部=原世界-新中心；原 += shift 使渲染世界=原+2*shift（如 FTMN4 3 平台整体北移 7.5y，6 平台 shift=0 不受影响）
         if (centerOverride != null && centerOverride.Value != center)
         {
             var shift = centerOverride.Value - center;
@@ -610,7 +612,7 @@ public sealed class ArenaBoundsCustom : ArenaBounds
                 var verts = CollectionsMarshal.AsSpan(combined[i].Vertices);
                 for (var j = 0; j < verts.Length; ++j)
                 {
-                    verts[j] += shift;
+                    verts[j] -= shift;
                 }
             }
 

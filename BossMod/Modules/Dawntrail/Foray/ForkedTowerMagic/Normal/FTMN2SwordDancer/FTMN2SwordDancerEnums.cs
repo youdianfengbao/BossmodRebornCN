@@ -43,6 +43,7 @@ public enum AID : uint
 
     // 回转：4D79 剑在读条结束时放月环（贴剑站）或钢铁（远离），读条 1.0s
     Spin = 49589, // 0xC1B5 DancingSword3->self, 1.0s cast, range 5-60 donut 月环（剑位置 5y 内安全）
+    Spin3 = 49590, // 0xC1B6 DancingSword3->self, 1.0s cast, range 5-60 donut 月环（2026-08-09 回放补充：双剑轮另一 id，同形 15~60；ModelState 5 月环验证）
     Spin1 = 49592, // 0xC1B8 DancingSword3->self, 1.0s cast, range 15 circle 钢铁（远离 15y）
     Spin2 = 49593, // 0xC1B9 DancingSword3->self, 1.0s cast, range 20 circle 钢铁（远离 20y，回放未出现备用）
 
@@ -55,7 +56,9 @@ public enum AID : uint
     SwordDance6 = 49614, // 0xC1CE DancingSword5->self, 1.5s cast, range 60 width 20 rect 剑舞直条（四连）
 
     // 跃进步法/戳地：boss 读条后 4 把 4D7A 剑在 4 边中点放 R5 圆（读条 3.6s）
-    LeapingLift = 49594, // 0xC1BA SwordDancer->self, 3.0s cast, 跃进步法（引导）
+    LeapingLift = 49594, // 0xC1BA SwordDancer->self, 3.0s cast, 跃步进步法（引导）
+    LeapingLift1 = 49596, // 0xC1BC SwordDancer->self, no cast（瞬发，回放补充）, 跃步进步法第 1 跳（dest=落点=击退顺序第 1 剑）
+    LeapingLift2 = 49597, // 0xC1BD SwordDancer->self, no cast（瞬发，回放补充）, 跃步进步法跳 2-4（dest=落点）
     Pierce = 49595, // 0xC1BB DancingSword2->self, 3.6s cast, range 5 circle 戳地（贴剑 5y 外）
 
     // 剑技爆发/剑气冲击：boss 读条后 4D7A 剑依次放剑气冲击（全屏击退，从剑位置向外，间隔 ~2.5s）
