@@ -1,4 +1,4 @@
-using BossMod.Dawntrail.Foray.CriticalEngagement;
+﻿using BossMod.Dawntrail.Foray.CriticalEngagement;
 
 namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN1TwoHeadedAevis;
 
@@ -16,6 +16,7 @@ sealed class TwoHeadedAevisAOEs(BossModule module) : ReplayValidatedCastAOEs(mod
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
         (uint)AID.Ability_PoisonBreath => new(PoisonBreath, true),
+        (uint)AID.Ability_LightningCluster or (uint)AID.Ability_IceCluster1 => new(OrbBurst, true),
         (uint)AID.Ability_TwoTerrors1 => new(TwoTerrors, true),
         (uint)AID.Ability_Shock => new(OrbBurst),
         (uint)AID.Ability_HypothermalCombustion => new(OrbBurst),
@@ -28,10 +29,14 @@ sealed class TwoHeadedAevisAOEs(BossModule module) : ReplayValidatedCastAOEs(mod
 
 // 50697/50698 是选择球的 8s 预兆；真正的球在选择判定后才开始短读条。
 // ARR 显示 selector 的落点贴着目标球，因此在长读条开始时就把对应球标成危险。
-sealed class SelectedOrbAOEs(BossModule module) : Components.GenericAOEs(module)
+// 雷/冰簇与雷霜暴风雨共享的球追踪器：
+// - 雷簇(50697)/冰簇(50698)读条时，把 EffectPosition 15m 内所有对应属性的球画 15m 危险圈（每次通常 2 个），并从未爆列表移除；
+// - 雷霜暴风雨(47735)读条时，把场上所有剩余球画 15m 危险圈，然后清空。
+// 与可达鸭脚本一致（50697 雷簇/50698 冰簇按 EffectPosition 匹配球；47735 引爆剩余球）。
+sealed class OrbExplosions(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeCircle Shape = new(15f);
-    private readonly List<AOEInstance> _displayed = [with(4)];
+    private readonly List<AOEInstance> _displayed = [with(16)];
     private readonly Dictionary<ulong, (uint OID, WPos Pos)> _balls = [];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(_displayed);
@@ -48,39 +53,43 @@ sealed class SelectedOrbAOEs(BossModule module) : Components.GenericAOEs(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
+        if (spell.EventHappened)
+            return;
         var wanted = spell.Action.ID switch
         {
-            (uint)AID.Ability_LightningCluster => (uint)OID.BallLightning,
-            (uint)AID.Ability_IceCluster1 => (uint)OID.SwirlingOrb,
-            _ => 0u
+            (uint)AID.Ability_LightningCluster => (uint)OID.BallLightning, // 雷簇 -> 雷球
+            (uint)AID.Ability_IceCluster1 => (uint)OID.SwirlingOrb,        // 冰簇 -> 冰球
+            (uint)AID.Ability_ThunderfrostTempest => 0u,                   // 雷霜暴风雨 -> 所有剩余球
+            _ => 0xFFFFFFFFu
         };
-        if (wanted == 0 || spell.EventHappened)
+        if (wanted == 0xFFFFFFFFu)
             return;
 
-        WPos? best = null;
-        var bestSq = float.MaxValue;
-        foreach (var (_, ball) in _balls)
+        var activation = Module.CastFinishAt(spell, 2d);
+        _displayed.RemoveAll(a => WorldState.CurrentTime > a.Activation);
+        if (wanted == 0u)
         {
-            if (ball.OID != wanted)
-                continue;
-            var sq = (ball.Pos - spell.LocXZ).LengthSq();
-            if (sq < bestSq)
+            // 雷霜暴风雨：引爆所有剩余球
+            foreach (var (_, ball) in _balls)
+                _displayed.Add(new(Shape, ball.Pos, activation: activation));
+            _balls.Clear();
+        }
+        else
+        {
+            // 雷簇/冰簇：引爆 EffectPosition 15m 内所有对应属性的球
+            var triggered = _balls.Where(kv => kv.Value.OID == wanted && (kv.Value.Pos - spell.LocXZ).LengthSq() <= 15f * 15f).Select(kv => kv.Key).ToList();
+            foreach (var id in triggered)
             {
-                bestSq = sq;
-                best = ball.Pos;
+                _displayed.Add(new(Shape, _balls[id].Pos, activation: activation));
+                _balls.Remove(id);
             }
         }
-        if (best is not { } pos || bestSq > 15f * 15f)
-            return;
-
-        _displayed.RemoveAll(a => (a.Origin - pos).LengthSq() < 1f);
-        _displayed.Add(new(Shape, pos, activation: Module.CastFinishAt(spell, 2d)));
     }
 
-    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID is (uint)AID.Ability_Shock or (uint)AID.Ability_HypothermalCombustion)
-            _displayed.RemoveAll(a => (a.Origin - caster.Position).LengthSq() < 4f);
+        if (spell.Action.ID is (uint)AID.Ability_LightningCluster or (uint)AID.Ability_IceCluster1 or (uint)AID.Ability_ThunderfrostTempest)
+            _displayed.RemoveAll(a => WorldState.CurrentTime >= a.Activation);
     }
 
     public override void Update()
@@ -89,42 +98,47 @@ sealed class SelectedOrbAOEs(BossModule module) : Components.GenericAOEs(module)
         base.Update();
     }
 }
-// 雷霜暴风雨: 施法时把场上所有存活的雷球/冰球位置画 15m 危险圈。
-// 球的实机位置/追踪不可靠，改为 OnActorCreated 记录球位（与可达鸭 AddCombatant 记录一致），
-// 避免 Enemies 列表缓存/位置缺失导致漏画。
-sealed class ThunderfrostTempest(BossModule module) : Components.GenericAOEs(module)
+
+// 风暴吐息（48243）：从场中向外击退 14y。
+// 47616 是同一时间出现的视觉 cast，不是额外击退源；只画真实的 48243 单条中心击退线。
+sealed class StormsBreathKnockback(BossModule module) : Components.GenericKnockback(module)
 {
-    private static readonly AOEShapeCircle Shape = new(15f);
-    private readonly List<AOEInstance> _displayed = [with(12)];
-    private readonly Dictionary<ulong, WPos> _balls = [];
+    private const float Distance = 14f;
+    private readonly List<Knockback> _knockbacks = [with(2)];
 
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(_displayed);
-
-    public override void OnActorCreated(Actor actor)
-    {
-        if (actor.OID is (uint)OID.BallLightning or (uint)OID.SwirlingOrb)
-            _balls[actor.InstanceID] = actor.Position;
-    }
-
-    public override void OnActorDestroyed(Actor actor) => _balls.Remove(actor.InstanceID);
-
-    public override void OnActorDeath(Actor actor) => _balls.Remove(actor.InstanceID);
+    public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor)
+        => CollectionsMarshal.AsSpan(_knockbacks);
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID != (uint)AID.Ability_ThunderfrostTempest || spell.EventHappened)
+        if (spell.EventHappened || spell.Action.ID != (uint)AID.Ability_StormsBreathAOE)
             return;
 
-        _displayed.Clear();
-        var activation = Module.CastFinishAt(spell);
-        foreach (var (_, pos) in _balls)
-            _displayed.Add(new(Shape, pos, activation: activation));
+        _knockbacks.Clear();
+        _knockbacks.Add(new(Module.Arena.Center, Distance, Module.CastFinishAt(spell), actorID: caster.InstanceID));
     }
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.Ability_ThunderfrostTempest)
-            _displayed.Clear();
+        if (spell.Action.ID == (uint)AID.Ability_StormsBreathAOE)
+            _knockbacks.RemoveAll(kb => kb.ActorID == caster.InstanceID);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (_knockbacks.Count == 0)
+            return;
+
+        ref readonly var knockback = ref CollectionsMarshal.AsSpan(_knockbacks)[0];
+        if (!IsImmune(slot, knockback.Activation))
+            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Arena.Center, knockback.Origin, Distance, 20f), knockback.Activation);
+    }
+
+    public override void DrawArenaForeground(int pcSlot, Actor pc)
+    {
+        base.DrawArenaForeground(pcSlot, pc);
+        if (_knockbacks.Count != 0)
+            Arena.ZoneCircle(Module.Arena.Center, 5f, Colors.Safe);
     }
 }
 
@@ -133,9 +147,13 @@ sealed class ThunderfrostTempest(BossModule module) : Components.GenericAOEs(mod
 sealed class TimedCurseKnockback(BossModule module) : Components.GenericKnockback(module)
 {
     private const float Distance = 15f;
-    private const double Delay = 13d;
+    private const double FallbackDelay = 13d;
+    private const double LandingAOEWindow = 3d;
     private readonly List<Knockback> _knockbacks = [with(8)];
     private readonly List<Knockback> _filtered = [with(2)];
+    private readonly List<Components.GenericAOEs.AOEInstance> _landingAOEs = [with(16)];
+    private readonly TwoHeadedAevisAOEs _castAOEs = module.FindComponent<TwoHeadedAevisAOEs>()!;
+    private readonly OrbExplosions _orbAOEs = module.FindComponent<OrbExplosions>()!;
 
     // 定时诅咒是全员同时中的状态：若不按 ActorID 过滤，GenericKnockback 会把全队每个人的
     // 击退线都从本地玩家脚下画出，24 条红线铺满全场（可达鸭脚本用 TargetId==Me + Owner=Me 过滤）。
@@ -149,6 +167,35 @@ sealed class TimedCurseKnockback(BossModule module) : Components.GenericKnockbac
         return CollectionsMarshal.AsSpan(_filtered);
     }
 
+    public override bool DestinationUnsafe(int slot, Actor actor, WPos pos)
+    {
+        var knockbacks = ActiveKnockbacks(slot, actor);
+        if (knockbacks.Length != 0)
+        {
+            CollectLandingAOEs(slot, actor, knockbacks[0].Activation);
+            foreach (var aoe in _landingAOEs)
+                if (aoe.Check(pos))
+                    return true;
+        }
+        return !Arena.InBounds(pos);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        var knockbacks = ActiveKnockbacks(slot, actor);
+        if (knockbacks.Length == 0)
+            return;
+
+        ref readonly var knockback = ref knockbacks[0];
+        if (IsImmune(slot, knockback.Activation))
+            return;
+
+        CollectLandingAOEs(slot, actor, knockback.Activation);
+        var direction = knockback.Distance * knockback.Direction.ToDirection();
+        hints.AddForbiddenZone(new SDKnockbackInAABBSquareFixedDirectionPlusMixedAOEs(
+            Arena.Center, direction, 19.5f, [.. _landingAOEs], _landingAOEs.Count), knockback.Activation);
+    }
+
     public override void OnStatusGain(Actor actor, ref ActorStatus status)
     {
         var direction = status.ID switch
@@ -160,8 +207,13 @@ sealed class TimedCurseKnockback(BossModule module) : Components.GenericKnockbac
         if (direction is not { } dir)
             return;
 
+        // ARR status duration is the authoritative hit time.  The fixed 13s value is retained
+        // only for truncated replay packets that do not carry a usable expiration timestamp.
+        var activation = status.ExpireAt > WorldState.CurrentTime
+            ? status.ExpireAt
+            : WorldState.FutureTime(FallbackDelay);
         _knockbacks.RemoveAll(kb => kb.ActorID == actor.InstanceID);
-        _knockbacks.Add(new(actor.Position, Distance, WorldState.FutureTime(Delay), default, dir, Kind.DirForward, actorID: actor.InstanceID));
+        _knockbacks.Add(new(actor.Position, Distance, activation, default, dir, Kind.DirForward, actorID: actor.InstanceID));
     }
 
     public override void OnStatusLose(Actor actor, ref ActorStatus status)
@@ -176,47 +228,23 @@ sealed class TimedCurseKnockback(BossModule module) : Components.GenericKnockbac
         _knockbacks.RemoveAll(kb => now > kb.Activation.AddSeconds(1d));
         base.Update();
     }
-}
 
-
-// 风暴吐息: 全场从场中击退 15m（旧版视为击退而非 30m 全屏圈）。
-// 画击退线 + 场中绿色安全区；不加全屏禁区避免"全屏伤害"。
-sealed class StormsBreathKnockback(BossModule module) : Components.GenericKnockback(module)
-{
-    private const float Distance = 15f;
-    private readonly List<Knockback> _knockbacks = [with(2)];
-
-    public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor) => CollectionsMarshal.AsSpan(_knockbacks);
-
-    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    private void CollectLandingAOEs(int slot, Actor actor, DateTime activation)
     {
-        if (spell.Action.ID != (uint)AID.Ability_StormsBreathAOE || spell.EventHappened)
-            return;
-        _knockbacks.Clear();
-        _knockbacks.Add(new(Module.Arena.Center, Distance, Module.CastFinishAt(spell)));
+        _landingAOEs.Clear();
+        AddLandingAOEs(_castAOEs.ActiveAOEs(slot, actor), activation);
+        AddLandingAOEs(_orbAOEs.ActiveAOEs(slot, actor), activation);
     }
 
-    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    private void AddLandingAOEs(ReadOnlySpan<Components.GenericAOEs.AOEInstance> aoes, DateTime activation)
     {
-        if (spell.Action.ID == (uint)AID.Ability_StormsBreathAOE)
-            _knockbacks.Clear();
-    }
-
-    public override void Update()
-    {
-        var now = WorldState.CurrentTime;
-        _knockbacks.RemoveAll(kb => now > kb.Activation.AddSeconds(1d));
-        base.Update();
-    }
-
-    public override void DrawArenaForeground(int pcSlot, Actor pc)
-    {
-        base.DrawArenaForeground(pcSlot, pc);
-        // 场中绿色安全区: 距中心 5m 内被击退 15m 后仍留在 20m 半宽的场内
-        if (_knockbacks.Count != 0)
-            Arena.ZoneCircle(Module.Arena.Center, 5f, Colors.Safe);
+        foreach (ref readonly var aoe in aoes)
+            if (Math.Abs((aoe.Activation - activation).TotalSeconds) <= LandingAOEWindow)
+                _landingAOEs.Add(aoe);
     }
 }
+
+
 [ModuleInfo(BossModuleInfo.Maturity.Contributed,
     Contributors = "KanoNoUta",
     PrimaryActorOID = (uint)OID.TwoHeadedAevis,

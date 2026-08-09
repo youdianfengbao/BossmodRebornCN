@@ -1,4 +1,4 @@
-namespace BossMod.Dawntrail.Foray.FATE.CrescentFan;
+﻿namespace BossMod.Dawntrail.Foray.FATE.CrescentFan;
 
 public enum OID : uint {
     CrescentFan = 0x4D8D, // 新月风扇 (main target of FATE 2073)
@@ -11,11 +11,11 @@ public enum AID : uint {
     AutoAttack = 40542, // CrescentFan/BigFan->player, no cast, single-target
     HighPressureTornado = 50221, // 高压龙卷, CrescentFan->self, 2.7s cast, range 15 width 4 rect
     HighPressureTornadoBig = 50222, // 高压龙卷, BigFan->self, 2.7s cast, range 15 width 4 rect
-    Tempest = 50223, // 暴风, BigFan->self, 5.7s cast, range 20 circle
+    Tempest = 50223, // 暴风, BigFan->self, 5.7s cast, raidwide (whole arena, no avoid)
 }
 
 sealed class HighPressureTornado(BossModule module) : Components.SimpleAOEGroups(module, [(uint)AID.HighPressureTornado, (uint)AID.HighPressureTornadoBig], new AOEShapeRect(15.0f, 2.0f));
-sealed class Tempest(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Tempest, 20f);
+sealed class Tempest(BossModule module) : Components.RaidwideCast(module, (uint)AID.Tempest);
 
 [SkipLocalsInit]
 sealed class CrescentFanStates : StateMachineBuilder {

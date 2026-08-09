@@ -3,8 +3,11 @@
 public enum OID : uint
 {
     SwordDancer = 0x4D76, // R6.000, x1
+    DancingSwordThrowing = 0x4D77, // R2.000, x4
     Helper = 0x233C, // R0.500, x29, Helper type
     DancingSwordCyclosword = 0x4D79, // R2.000, x3
+    DancingSwordLeaping = 0x4D7A, // R1.000, x5
+    DancingSwordMystique = 0x4D7B, // R2.000, x2
     DancingSwordSurgesword = 0x4D7C, // R2.000, x16
     SwordDanceMarker = 0x1EC033, // R0.500, x0 (spawn during fight), EventObj type
     Actor1ec033 = SwordDanceMarker, // compatibility alias used by the replay-backed sword-dance preview

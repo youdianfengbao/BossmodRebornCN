@@ -1,4 +1,4 @@
-namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN1TwoHeadedAevis;
+﻿namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN1TwoHeadedAevis;
 
 [SkipLocalsInit]
 sealed class TwoHeadedAevisStates : StateMachineBuilder
@@ -7,8 +7,7 @@ sealed class TwoHeadedAevisStates : StateMachineBuilder
     {
         TrivialPhase()
             .ActivateOnEnter<TwoHeadedAevisAOEs>()
-            .ActivateOnEnter<SelectedOrbAOEs>()
-            .ActivateOnEnter<ThunderfrostTempest>()
+            .ActivateOnEnter<OrbExplosions>()
             .ActivateOnEnter<StormsBreathKnockback>()
             .ActivateOnEnter<TimedCurseKnockback>();
     }

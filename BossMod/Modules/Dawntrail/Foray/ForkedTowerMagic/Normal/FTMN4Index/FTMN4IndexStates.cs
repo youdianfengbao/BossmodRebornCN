@@ -6,7 +6,9 @@ sealed class IndexStates : StateMachineBuilder
     public IndexStates(BossModule module) : base(module)
     {
         TrivialPhase()
+            .ActivateOnEnter<IndexArenaOutline>()
             .ActivateOnEnter<IndexAOEs>()
+            .ActivateOnEnter<ElementaryChemistryPlatforms>()
             .ActivateOnEnter<ElementalSectors>()
             .ActivateOnEnter<PropulsiveShockwave>()
             .ActivateOnEnter<AllConsumingFlames>();
