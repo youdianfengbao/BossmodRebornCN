@@ -3,7 +3,7 @@
 // （ZoneID 1346 新月岛北部）。OID/AID/SID 枚举由 The Combat Reborn Team (LTS) 数据导入生成。
 namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN3Necrophobia;
 
-[ModuleInfo(BossModuleInfo.Maturity.Dummy, // 发版隐藏（2026-08-09）
+[ModuleInfo(BossModuleInfo.Maturity.Contributed, // 恢复显示继续测试（2026-08-09）
     StatesType = typeof(NecrophobiaStates),
     ConfigType = null, // 如需要可替换为 typeof(NecrophobiaConfig)
     ObjectIDType = typeof(OID),
@@ -25,9 +25,9 @@ namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN3Necrophobia;
 public sealed class Necrophobia(WorldState ws, Actor primary) : BossModule(ws, primary, new(100f, 800f), new ArenaBoundsCircle(24f));
 
 // ==================== 组件（形状/时机均来自 2026-08-06 三场回放实测） ====================
-// 角度换算说明：游戏内 rotation 0=北、方向向量 (-sinθ,-cosθ)，BossMod 角度 0=南、方向 (sin a, cos a)，
-// 二者差 180°。但 Rect/Cross 类形状以施法落点（loc）为对称中心绘制，loc 自带方向偏移，读条 rotation 可直接使用；
-// Cone 类形状以施法者为圆心，需对读条 rotation +180° 才与游戏方向一致（与上游 Hunt boss 扇形实现一致）。
+// 角度说明：读条 rotation（spell.Rotation）即 BossMod 使用的实际朝向（ToDirection 方向 (sinθ, cosθ)，
+// 与游戏朝向一致，参照回放验证的 CE214/ReplayValidatedCastAOEs 惯例），所有形状（Rect/Cross/Cone）直接使用、无需换算。
+// 真空波组件曾误加 +180° 致危险区画到 boss 背后，2026-08-09 已修正为直接用读条朝向。
 //
 // 对照 ACT 触发器参数（2026-08-07，魔之塔后半触发器日志"Boss 3 惧死者"简易播报 13 键表）：
 // ACT 的 omen Scale 与米制为 1:1 映射（已验证：FTMN4 爱之歌 ACT Scale 15 ↔ BossMod R15、盯准 Scale 11 ↔ R11，
@@ -41,8 +41,8 @@ sealed class HailOfHellflares(BossModule module) : Components.RaidwideCast(modul
 // 古代爆炎：本体读条 4.7s 的钢铁（R18）。对照 ACT（2026-08-07）：B96C/B969 omen=Circle Scale=18,18,1（1:1 = R18，t=5.2）
 sealed class AncientFireIII(BossModule module) : Components.SimpleAOEs(module, (uint)AID.AncientFireIII, 18f);
 
-// 古代冰封：本体读条 4.7s 的十字（range 45 width 15 cross：半长 22.5、半宽 7.5）。对照 ACT（2026-08-07）：B96D/B96A omen=Rect2 Scale=7.5,45,1 cross
-sealed class AncientBlizzardIII(BossModule module) : Components.SimpleAOEs(module, (uint)AID.AncientBlizzardIII, new AOEShapeCross(22.5f, 7.5f));
+// 古代冰封：本体读条 4.7s 的十字（半臂 45、半宽 7.5、全长 90，实测确认十字更大）。对照 ACT（2026-08-07）：B96D/B96A omen=Rect2 Scale=7.5,45,1 cross（原 45 为全长，现半臂 45 全长 90，以国服实测为准）
+sealed class AncientBlizzardIII(BossModule module) : Components.SimpleAOEs(module, (uint)AID.AncientBlizzardIII, new AOEShapeCross(45f, 7.5f));
 
 // 碎尸：死刑（读条 4.7s，回放实测目标为 MT 且带 218 号锁定图标）
 sealed class CorpseMangler(BossModule module) : Components.SingleTargetCast(module, (uint)AID.CorpseMangler, "碎尸：死刑");
@@ -56,14 +56,14 @@ sealed class SeveringHeadThunder(BossModule module) : Components.SimpleAOEs(modu
 // 魔具联动：爆炎（本体 47465 R18 钢铁 + 屏障头 47468 R18，同步读条 5.2s）。对照 ACT（2026-08-07）：B969 omen=Circle Scale=18,18,1（t=5.2）
 sealed class SeveredFire(BossModule module) : Components.SimpleAOEGroups(module, [(uint)AID.SeveredFireIII, (uint)AID.AncientFireIII1], 18f);
 
-// 魔具联动：冰封（本体 47466 十字 + 屏障头 47469 十字，同步读条 5.2s）。对照 ACT（2026-08-07）：B96A omen=Rect2 Scale=7.5,45,1 cross
-sealed class SeveredBlizzard(BossModule module) : Components.SimpleAOEGroups(module, [(uint)AID.SeveredBlizzardIII, (uint)AID.AncientBlizzardIII1], new AOEShapeCross(22.5f, 7.5f));
+// 魔具联动：冰封（本体 47466 十字 + 屏障头 47469 十字，同步读条 5.2s，半臂 45、半宽 7.5、全长 90，实测确认十字更大）。对照 ACT（2026-08-07）：B96A omen=Rect2 Scale=7.5,45,1 cross（原 45 为全长，现半臂 45 全长 90，以国服实测为准）
+sealed class SeveredBlizzard(BossModule module) : Components.SimpleAOEGroups(module, [(uint)AID.SeveredBlizzardIII, (uint)AID.AncientBlizzardIII1], new AOEShapeCross(45f, 7.5f));
 
-// 灭亡射线：8 个屏障头同时读条 4.7s，各自发射 Rect 3x30（range 30 width 6：半长 15、半宽 3，中心在头位置）。对照 ACT（2026-08-07）：B973 omen=Rect Scale=3,30,1（t=4.7）
-sealed class DeathlyRay(BossModule module) : Components.SimpleAOEs(module, (uint)AID.DeathlyRay, new AOEShapeRect(15f, 3f, 15f));
+// 灭亡射线：8 个屏障头同时读条 4.7s，各自发射 Rect 3x30（range 30 width 6：向前 30、半宽 3、向后 0，从屏障头位置沿朝向延伸 30 米）。对照 ACT（2026-08-07）：B973 omen=Rect Scale=3,30,1（t=4.7，总长 30 宽 6 吻合）
+sealed class DeathlyRay(BossModule module) : Components.SimpleAOEs(module, (uint)AID.DeathlyRay, new AOEShapeRect(30f, 3f, 0f));
 
 // 真空波：本体读条 3.7s 的 180° 扇形（R30），朝面前方向覆盖半场，需站 boss 背后躲避；
-// AI 引导：扇形禁区（避让）+ boss 背后站位 Goal
+// AI 避让由 GenericAOEs 基类 AddAIHints 按 Risky 项自动生成扇形禁区（原 boss 背后站位 Goal 绿圈已删除，2026-08-09）
 sealed class VacuumWave(BossModule module) : Components.GenericAOEs(module, (uint)AID.VacuumWave, "真空波：站 boss 背后！")
 {
     private static readonly AOEShapeCone _shape = new(30f, 90f.Degrees());
@@ -75,8 +75,9 @@ sealed class VacuumWave(BossModule module) : Components.GenericAOEs(module, (uin
     {
         if (spell.Action.ID == WatchedAction)
         {
-            // 扇形以施法者为中心：读条 rotation（游戏角度 0=北）需 +180° 转 BossMod（0=南）方向
-            _aoes.Add(new(_shape, caster.Position, spell.Rotation + 180f.Degrees(), Module.CastFinishAt(spell), actorID: caster.InstanceID));
+            // 扇形以施法者（boss）为中心，危险区为 boss 面向方向的 180° 半圆（安全区在 boss 背后）；
+            // 读条 rotation 即 boss 实际面向方向，直接使用（曾误加 +180° 致画到背后，已修正）
+            _aoes.Add(new(_shape, caster.Position, spell.Rotation, Module.CastFinishAt(spell), actorID: caster.InstanceID));
         }
     }
 
@@ -97,28 +98,31 @@ sealed class VacuumWave(BossModule module) : Components.GenericAOEs(module, (uin
         }
     }
 
-    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
-    {
-        base.AddAIHints(slot, actor, assignment, hints); // 禁区 = 扇形本身（正面即危险区）
-        var len = _aoes.Count;
-        for (var i = 0; i < len; ++i)
-        {
-            var aoe = _aoes[i];
-            // 引导站位：boss 背后（危险方向的反向），让 AI 就近就位而非贴着禁区边缘
-            hints.GoalZones.Add(AIHints.GoalSingleTarget(aoe.Origin - aoe.Rotation.ToDirection() * 8f, 3f, 0.5f));
-        }
-    }
 }
 
 // 黑暗奔流：本体引导 47476/47479（3.9s）与 47477 第一段（5.2s）同步开始；
-// 第一段 Rect(60x10) 中心在 boss 前方 30（近端即 boss）；随后 47478 步进对 Rect(10x60)
-// 沿垂直方向 ±5→±15 推进（每 ~2.1s 一对，0.7s 快读条）；6s 后古代暴雷（或第二轮同步屏障头暴雷）。
-// 组件在 47477 开始时预测步进对（时间对齐回放实测），47478 实测读条到达时以实际落点替换。
+// 第一段 Rect(60x10)（forward 60/back 0）：47477 由 Helper 施放，CastLocation 在 boss 前方 30（沿游戏面向方向），
+// spell.Rotation 直接用 = 游戏面向反方向（BossMod 角度 0=南 vs 游戏 0=北，差 180°），二者抵消后实际覆盖
+// = boss 位置前后各 30 米（长 60 宽 10，穿过整个 R24 场地）。
+// 随后 47478 步进对 Rect(10x60) 沿垂直方向 ±10→±20 推进（每 ~2.1s 一对，0.7s 快读条；实测落点 ±10/±20，2026-08-09 回放确认）。
+// 分阶段显示：P0（47477 读条预警期）只显示第一段（高危 Danger）+ ±10 预测对（普通 AOE 色、不参与 AI）；
+// P1（47477 结算，OnCastFinished 触发）±10 转高危、添加 ±20 预测对（普通）；P2（第一批 47478 读条结束，OnCastFinished 事件触发）±20 转高危。
+// 任何时刻 AI 只看到当前即将生效的一组矩形（GenericAOEs.AddAIHints 只对 Risky 项加禁区）。
+// 47478 由 Helper 施放，omen 矩形中心 = Helper 位置（= 预测 origin，误差 <0.02m）；spell.LocXZ（CastLocation）
+// 是 Helper 沿自身面向朝 boss 前移 5m 的落点、不是矩形中心，故用 caster.Position 匹配/绘制（0.5m 容差替换 100% 成功），
+// 替换项保持当前阶段颜色/风险；未匹配（兜底）则按当前阶段新增。
 sealed class DarkCurrent(BossModule module) : Components.GenericAOEs(module)
 {
-    private static readonly AOEShapeRect _shapeFirst = new(30f, 5f, 30f); // 第一段：长 60 宽 10（中心在施法点）
+    private enum Phase { P0, P1, P2 }
+
+    private static readonly AOEShapeRect _shapeFirst = new(60f, 5f, 0f); // 第一段：长 60 宽 10（覆盖 boss 前后各 30）
     private static readonly AOEShapeRect _shapeStep = new(5f, 30f, 5f); // 步进：长 10 宽 60（中心在施法点）
     private readonly List<AOEInstance> _aoes = [];
+    private Phase _phase;
+    private Angle _perp;
+    private WPos _center;
+    private DateTime _t1;
+    private DateTime _t2;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
@@ -131,29 +135,93 @@ sealed class DarkCurrent(BossModule module) : Components.GenericAOEs(module)
     {
         if (spell.Action.ID == (uint)AID.DarkCurrent1) // 47477 第一段
         {
-            _aoes.Add(new(_shapeFirst, spell.LocXZ, spell.Rotation, Module.CastFinishAt(spell), actorID: caster.InstanceID));
-            // 预测步进对：垂直方向 ±5（第一段结束 +1.2s）与 ±15（+3.3s），时间来自回放实测（47477 生效后 ~1.1s 与 ~3.2s）
-            var perp = spell.Rotation + 90f.Degrees();
-            var perpDir = perp.ToDirection();
-            var center = Module.PrimaryActor.Position;
-            var t1 = Module.CastFinishAt(spell, 1.2d);
-            var t2 = Module.CastFinishAt(spell, 3.3d);
-            _aoes.Add(new(_shapeStep, center + perpDir * 5f, perp, t1));
-            _aoes.Add(new(_shapeStep, center - perpDir * 5f, perp, t1));
-            _aoes.Add(new(_shapeStep, center + perpDir * 15f, perp, t2));
-            _aoes.Add(new(_shapeStep, center - perpDir * 15f, perp, t2));
+            _phase = Phase.P0;
+            _aoes.Clear();
+            // 第一段矩形：高危预警（深黄 Danger），读条期间 AI 只看它
+            _aoes.Add(new(_shapeFirst, spell.LocXZ, spell.Rotation, Module.CastFinishAt(spell), Colors.Danger, actorID: caster.InstanceID));
+            // 预测步进对：垂直方向 ±10（t1）与 ±20（t2），实测落点 ±10/±20；时间相对 47477 结束 +1.2s/+3.3s
+            _perp = spell.Rotation + 90f.Degrees();
+            _center = Module.PrimaryActor.Position;
+            _t1 = Module.CastFinishAt(spell, 1.2d);
+            _t2 = Module.CastFinishAt(spell, 3.3d);
+            var perpDir = _perp.ToDirection();
+            // P0 只添加 ±10 预测对（普通 AOE 色、不参与 AI）；±20 到 P1 才添加
+            _aoes.Add(new(_shapeStep, _center + perpDir * 10f, _perp, _t1, risky: false));
+            _aoes.Add(new(_shapeStep, _center - perpDir * 10f, _perp, _t1, risky: false));
         }
         else if (spell.Action.ID == (uint)AID.DarkCurrent2) // 47478 步进（实测替换预测）
         {
-            _aoes.RemoveAll(a => a.Shape == _shapeStep && a.Origin.AlmostEqual(spell.LocXZ, 0.5f));
-            _aoes.Add(new(_shapeStep, spell.LocXZ, spell.Rotation, Module.CastFinishAt(spell), actorID: caster.InstanceID));
+            // 47478 由 Helper 施放，omen 矩形中心 = Helper 位置（= 预测 origin，误差 <0.02m）；
+            // spell.LocXZ（CastLocation）是 Helper 沿自身面向朝 boss 前移 5m 的落点、不是矩形中心，故用 caster.Position 匹配/绘制
+            var wasRisky = false;
+            var wasColor = default(uint);
+            var idx = _aoes.FindIndex(a => a.Shape == _shapeStep && a.Origin.AlmostEqual(caster.Position, 0.5f));
+            if (idx >= 0)
+            {
+                // 匹配到预测项：替换并保持该项当前阶段的状态（颜色/风险）
+                wasRisky = _aoes[idx].Risky;
+                wasColor = _aoes[idx].Color;
+                _aoes.RemoveAt(idx);
+            }
+            else
+            {
+                // 未匹配（兜底）：按当前阶段设定（P2 起高危）
+                wasRisky = _phase >= Phase.P2;
+                wasColor = wasRisky ? Colors.Danger : default;
+            }
+            _aoes.Add(new(_shapeStep, caster.Position, spell.Rotation, Module.CastFinishAt(spell), color: wasColor, risky: wasRisky, actorID: caster.InstanceID));
         }
     }
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID is (uint)AID.DarkCurrent1 or (uint)AID.DarkCurrent2)
+        if (spell.Action.ID == (uint)AID.DarkCurrent1)
         {
+            if (_phase == Phase.P0)
+            {
+                // P0 → P1：显式移除已结算的第一段矩形；±10 预测对转高危；添加 ±20 预测对（普通）
+                _phase = Phase.P1;
+                _aoes.RemoveAll(a => a.ActorID == caster.InstanceID);
+                var len = _aoes.Count;
+                for (var i = 0; i < len; ++i)
+                {
+                    if (_aoes[i].Shape == _shapeStep)
+                    {
+                        var a = _aoes[i];
+                        a.Risky = true;
+                        a.Color = Colors.Danger;
+                        _aoes[i] = a;
+                    }
+                }
+                var perpDir = _perp.ToDirection();
+                _aoes.Add(new(_shapeStep, _center + perpDir * 20f, _perp, _t2, risky: false));
+                _aoes.Add(new(_shapeStep, _center - perpDir * 20f, _perp, _t2, risky: false));
+            }
+            else
+            {
+                _aoes.RemoveAll(a => a.ActorID == caster.InstanceID);
+            }
+        }
+        else if (spell.Action.ID == (uint)AID.DarkCurrent2)
+        {
+            if (_phase == Phase.P1)
+            {
+                // 第一批（±10）47478 读条结束 → P2：未到期的 ±20 预测转高危（±10 已结算 activation 已过，不转）
+                _phase = Phase.P2;
+                var time = WorldState.CurrentTime;
+                var len = _aoes.Count;
+                for (var i = 0; i < len; ++i)
+                {
+                    if (_aoes[i].Shape == _shapeStep && _aoes[i].Activation > time)
+                    {
+                        var a = _aoes[i];
+                        a.Risky = true;
+                        a.Color = Colors.Danger;
+                        _aoes[i] = a;
+                    }
+                }
+            }
+            // 第二批（±20）47478 结束：_phase 已为 P2，仅移除实测项
             _aoes.RemoveAll(a => a.ActorID == caster.InstanceID);
         }
     }
@@ -164,5 +232,14 @@ sealed class DarkCurrent(BossModule module) : Components.GenericAOEs(module)
         {
             ++NumCasts;
         }
+    }
+}
+
+// 场地中心弱引导：AI 尽量靠近场地中心（半径 15，权重 0.1，不强制）
+sealed class CenterGoal(BossModule module) : BossComponent(module)
+{
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        hints.GoalZones.Add(AIHints.GoalSingleTarget(Module.Arena.Center, 15f, 0.1f));
     }
 }

@@ -25,7 +25,8 @@ sealed class SwordDancerStates : StateMachineBuilder
                 .ActivateOnEnter<Pierce>()
                 .ActivateOnEnter<Swordspear>()
                 .ActivateOnEnter<Rush>()
-                .ActivateOnEnter<Turn>();
+                .ActivateOnEnter<Turn>()
+                .ActivateOnEnter<CenterGoal>();
         }, "开战");
         // 剑技风暴读条结束 → 切主循环
         p0.Raw.Update = () => Module.PrimaryActor.CastInfo?.Action.ID != (uint)AID.SwordStorm1;
@@ -43,7 +44,8 @@ sealed class SwordDancerStates : StateMachineBuilder
                 .ActivateOnEnter<Pierce>()
                 .ActivateOnEnter<Swordspear>()
                 .ActivateOnEnter<Rush>()
-                .ActivateOnEnter<Turn>();
+                .ActivateOnEnter<Turn>()
+                .ActivateOnEnter<CenterGoal>();
             CastMulti(id + 0x10, [(uint)AID.MartialMystique1, (uint)AID.MartialMystique3], 5.5f, 5.5f, "秘法剑"); // 左/右手侧随机
             CastMulti(id + 0x20, [(uint)AID.MartialMystique1, (uint)AID.MartialMystique3], 5.5f, 5.5f, "秘法剑");
             Cast(id + 0x30, (uint)AID.CycloswordsUnsheathed, 3.0f, 3.0f, "风旋剑出鞘");
@@ -85,7 +87,8 @@ sealed class SwordDancerStates : StateMachineBuilder
                 .ActivateOnEnter<Pierce>()
                 .ActivateOnEnter<Swordspear>()
                 .ActivateOnEnter<Rush>()
-                .ActivateOnEnter<Turn>();
+                .ActivateOnEnter<Turn>()
+                .ActivateOnEnter<CenterGoal>();
             Cast(id + 0x10, (uint)AID.Cycloswords, 3.0f, 3.0f, "风旋剑");
             Cast(id + 0x20, (uint)AID.SwordDance1, 5.0f, 5.0f, "剑舞");
             Cast(id + 0x30, (uint)AID.SurgeswordsUnsheathed, 3.0f, 3.0f, "强袭剑出鞘");

@@ -25,7 +25,8 @@ sealed class NecrophobiaStates : StateMachineBuilder
                 .ActivateOnEnter<SeveredBlizzard>()
                 .ActivateOnEnter<DeathlyRay>()
                 .ActivateOnEnter<VacuumWave>()
-                .ActivateOnEnter<DarkCurrent>();
+                .ActivateOnEnter<DarkCurrent>()
+                .ActivateOnEnter<CenterGoal>();
             CastMulti(id + 0x10, [(uint)AID.AncientFireIII, (uint)AID.AncientBlizzardIII], 10.6f, 4.7f, "古代爆炎/冰封"); // 三场回放顺序随机（爆炎→冰封 或 冰封→爆炎）
             CastMulti(id + 0x20, [(uint)AID.AncientFireIII, (uint)AID.AncientBlizzardIII], 5.0f, 4.7f, "古代爆炎/冰封");
             Cast(id + 0x30, (uint)AID.CorpseMangler, 6.0f, 4.7f, "碎尸（死刑）");
@@ -50,7 +51,8 @@ sealed class NecrophobiaStates : StateMachineBuilder
                 .ActivateOnEnter<SeveredBlizzard>()
                 .ActivateOnEnter<DeathlyRay>()
                 .ActivateOnEnter<VacuumWave>()
-                .ActivateOnEnter<DarkCurrent>();
+                .ActivateOnEnter<DarkCurrent>()
+                .ActivateOnEnter<CenterGoal>();
             Cast(id + 0x10, (uint)AID.HeadsRoll, 2.4f, 2.7f, "魔具展开");
             CastMulti(id + 0x20, [(uint)AID.SeveredFireIII, (uint)AID.SeveredBlizzardIII], 8.4f, 5.2f, "魔具联动"); // 三场回放顺序随机（爆炎→冰封 或 冰封→爆炎）
             CastMulti(id + 0x30, [(uint)AID.SeveredFireIII, (uint)AID.SeveredBlizzardIII], 9.1f, 5.2f, "魔具联动");
@@ -73,7 +75,8 @@ sealed class NecrophobiaStates : StateMachineBuilder
                 .ActivateOnEnter<SeveredBlizzard>()
                 .ActivateOnEnter<DeathlyRay>()
                 .ActivateOnEnter<VacuumWave>()
-                .ActivateOnEnter<DarkCurrent>();
+                .ActivateOnEnter<DarkCurrent>()
+                .ActivateOnEnter<CenterGoal>();
             Condition(id + 0x10, 6.9f, () => Module.Enemies((uint)OID.SeveringHead).Any(e => e.CastInfo?.Action.ID == (uint)AID.DeathlyRay), "灭亡射线×8", maxOverdue: 2f);
             Condition(id + 0x20, 9.2f, () => Module.Enemies((uint)OID.SeveringHead).Any(e => e.CastInfo?.Action.ID == (uint)AID.DeathlyRay), "灭亡射线×8", maxOverdue: 2f);
             Cast(id + 0x30, (uint)AID.VacuumWave, 0.9f, 3.7f, "真空波");
@@ -95,7 +98,8 @@ sealed class NecrophobiaStates : StateMachineBuilder
                 .ActivateOnEnter<SeveredBlizzard>()
                 .ActivateOnEnter<DeathlyRay>()
                 .ActivateOnEnter<VacuumWave>()
-                .ActivateOnEnter<DarkCurrent>();
+                .ActivateOnEnter<DarkCurrent>()
+                .ActivateOnEnter<CenterGoal>();
             Cast(id + 0x10, (uint)AID.AncientThunderIII, 5.4f, 3.9f, "古代暴雷");
         }, "黑暗奔流");
         // 第三次魔力注入读条开始 → 切最终阶段
@@ -115,7 +119,8 @@ sealed class NecrophobiaStates : StateMachineBuilder
                 .ActivateOnEnter<SeveredBlizzard>()
                 .ActivateOnEnter<DeathlyRay>()
                 .ActivateOnEnter<VacuumWave>()
-                .ActivateOnEnter<DarkCurrent>();
+                .ActivateOnEnter<DarkCurrent>()
+                .ActivateOnEnter<CenterGoal>();
             Cast(id + 0x10, (uint)AID.HeadsRoll, 2.4f, 2.7f, "魔具展开");
             Cast(id + 0x20, (uint)AID.SeveredDarkCurrent, 9.0f, 3.9f, "魔具联动：黑暗奔流"); // 同步屏障头冰封 ×2（组件自行绘制）
             Cast(id + 0x30, (uint)AID.SeveredDarkCurrent, 7.0f, 3.9f, "魔具联动：黑暗奔流"); // 同步屏障头暴雷 ×8

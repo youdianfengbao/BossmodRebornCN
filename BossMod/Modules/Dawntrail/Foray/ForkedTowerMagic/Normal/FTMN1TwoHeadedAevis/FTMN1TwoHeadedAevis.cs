@@ -60,8 +60,36 @@ sealed class WeakGuide(BossModule module) : BossComponent(module)
 // 决战（开战全屏 AoE）：本体 49727 + 双头 49726 同步读条 4.7s，回放确认全屏无落点
 sealed class OpeningClash(BossModule module) : Components.RaidwideCast(module, (uint)AID.Ability_DecisiveClash1, "决战：全屏伤害");
 
-// 剧毒吐息：Helper 47617 在场地中心放 R18 大圈（回放实测 loc=中心 (-900,700)，R18>半宽 17.5，四角安全）
-sealed class PoisonBreath(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Ability_PoisonBreath, 18f);
+// 剧毒吐息：Helper 47617 在场地中心放 R18 大圈（回放实测 loc=中心 (-900,700)，R18>半宽 17.5，四角安全）。
+// 诅咒复合（2026-08-09 用户方案，参照 Clusters）：定时诅咒复合时 AI 禁区 = R18 圈沿击退反方向平移 20f
+// （等价变换：落点(P+D)∈C ⟺ P∈(C−D)；5403 东风→平移东 20f、5404 西风→平移西 20f）；
+// 雷达显示（ActiveAOEs）保持原始位置不动；无诅咒 → 基类常规危险区（不平移）。
+sealed class PoisonBreath(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Ability_PoisonBreath, 18f)
+{
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        var curse = Module.FindComponent<CursedTimer>()?.KnockbackFor(actor);
+        if (curse != null && curse.Value.Kind == Components.GenericKnockback.Kind.DirForward)
+        {
+            // 有诅咒：禁区 = R18 圈沿击退反方向平移 20f（C−D 等价变换），不叠加原始禁区
+            var shift = -(curse.Value.Distance * curse.Value.Direction.ToDirection());
+            var aoes = ActiveAOEs(slot, actor);
+            var len = aoes.Length;
+            for (var i = 0; i < len; ++i)
+            {
+                ref readonly var aoe = ref aoes[i];
+                if (aoe.Risky)
+                {
+                    hints.AddForbiddenZone(new AOEShapeCircle(18f), aoe.Origin + shift); // 平移圆（单圆）
+                }
+            }
+        }
+        else
+        {
+            base.AddAIHints(slot, actor, assignment, hints); // 无诅咒：常规危险区（不平移）
+        }
+    }
+}
 
 // 风暴吐息击退（二段）：绿头 Helper 48243 以中心为原点向外击退（施法落点回放验证 = 场地中心 (-900,700)；
 // 距离按用户实测 2026-08-07 修正：位移 (-10.7,-9.0)≈14.0m，取 14f；R30 覆盖全场）。
@@ -535,11 +563,10 @@ sealed class BlazeGuide(BossModule module) : BossComponent(module)
 // 方向用 cast 落点与 Font 位置推导（回放 rotation 为游戏原值，不宜直用）
 sealed class ArcaneBeacon(BossModule module) : Components.GenericAOEs(module)
 {
-    private static readonly uint UrgentColor = 0xFF33CCFFu; // 深黄（ABGR 1.0/0.8/0.2），最接近生效的批次
     private readonly List<AOEInstance> _aoes = [];
 
-    // 紧迫度分级（2026-08-07 用户要求）：最接近生效的一批（前组 8 个）深黄+risky 触发 AI 规避，
-    // 其余批次（后组 8 个，3s 后生效）淡色 risky=false 仅提示，避免全场封锁
+    // 紧迫度分级（2026-08-07 用户要求）：最接近生效的一批（前组 8 个）深黄（Colors.Danger）+risky 触发 AI 规避，
+    // 其余批次（后组 8 个，3s 后生效）淡色（Colors.AOE 默认）risky=false 仅提示，避免全场封锁
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         var soon = DateTime.MaxValue;
@@ -555,7 +582,7 @@ sealed class ArcaneBeacon(BossModule module) : Components.GenericAOEs(module)
         {
             var a = _aoes[i];
             var urgent = soon != DateTime.MaxValue && a.Activation <= soon.AddSeconds(0.5f);
-            _aoes[i] = urgent ? a with { Color = UrgentColor, Risky = true } : a with { Color = Colors.AOE, Risky = false };
+            _aoes[i] = urgent ? a with { Color = Colors.Danger, Risky = true } : a with { Color = Colors.AOE, Risky = false };
         }
 
         return CollectionsMarshal.AsSpan(_aoes);

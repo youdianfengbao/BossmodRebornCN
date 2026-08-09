@@ -487,3 +487,12 @@ sealed class Turn(BossModule module) : Components.GenericAOEs(module, warningTex
         }
     }
 }
+
+// 场地中心弱引导：AI 尽量靠近场地中心（半径 15，权重 0.1，不强制）
+sealed class CenterGoal(BossModule module) : BossComponent(module)
+{
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        hints.GoalZones.Add(AIHints.GoalSingleTarget(Module.Arena.Center, 15f, 0.1f));
+    }
+}
