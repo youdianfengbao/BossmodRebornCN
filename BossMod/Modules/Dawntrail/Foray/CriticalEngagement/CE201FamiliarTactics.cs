@@ -47,8 +47,10 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
     private static readonly AOEShapeCircle Shape = new(4f);
     private static readonly AOEShapeCircle AIShape = new(5.5f);
     private const float PredictionLength = 8f;
+    private const double HelperHazardTimeout = 2d;
     private readonly List<Actor> _blades = module.Enemies((uint)OID.AlabasterBlade);
-    private readonly HashSet<ulong> _observedBladeIDs = [];
+    private readonly HashSet<ulong> _resolvedBladeIDs = [];
+    private readonly Dictionary<ulong, DateTime> _helperLastSeen = [];
     private readonly List<Actor> _liveHazards = [with(16)];
     private readonly List<AOEInstance> _active = [with(8)];
 
@@ -76,32 +78,62 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
-        // The actual moving collision is emitted by OID 0x233C helpers in ARR, not only by the
-        // visible AlabasterBlade actors. Track only casters that have produced a real collision;
-        // unrelated helpers must never become false danger zones.
-        if (spell.Action.ID is (uint)AID.UnbowedSpirit or (uint)AID.Gale)
-            _observedBladeIDs.Add(caster.InstanceID);
+        // The visible blade actor remains spawned for roughly two seconds after its cast effect.
+        // Retire it from the live hazard set as soon as the effect resolves instead of waiting
+        // for the delayed ActorControl destroy packet.
+        if (caster.OID == (uint)OID.AlabasterBlade && IsBladeResolution(spell.Action.ID))
+        {
+            _resolvedBladeIDs.Add(caster.InstanceID);
+            return;
+        }
+
+        // OID 0x233C helpers emit the moving no-cast pulses. Their actors survive several seconds
+        // after the final pulse, so use activity time rather than delayed destruction as lifetime.
+        if (caster.OID == (uint)OID.Helper && spell.Action.ID is (uint)AID.UnbowedSpirit or (uint)AID.Gale)
+            _helperLastSeen[caster.InstanceID] = WorldState.CurrentTime;
     }
 
-    public override void OnActorDeath(Actor actor) => _observedBladeIDs.Remove(actor.InstanceID);
-    public override void OnActorDestroyed(Actor actor) => _observedBladeIDs.Remove(actor.InstanceID);
+    public override void OnActorDeath(Actor actor)
+    {
+        _resolvedBladeIDs.Remove(actor.InstanceID);
+        _helperLastSeen.Remove(actor.InstanceID);
+    }
+
+    public override void OnActorDestroyed(Actor actor)
+    {
+        _resolvedBladeIDs.Remove(actor.InstanceID);
+        _helperLastSeen.Remove(actor.InstanceID);
+    }
 
     private Actor[] LiveHazards()
     {
+        var now = WorldState.CurrentTime;
+        foreach (var id in _helperLastSeen.Where(entry => (now - entry.Value).TotalSeconds > HelperHazardTimeout).Select(entry => entry.Key).ToArray())
+            _helperLastSeen.Remove(id);
+
         _liveHazards.Clear();
         var seen = new HashSet<ulong>();
         foreach (var blade in _blades)
         {
-            if (!blade.IsDeadOrDestroyed && seen.Add(blade.InstanceID))
+            if (!blade.IsDeadOrDestroyed && !_resolvedBladeIDs.Contains(blade.InstanceID) && seen.Add(blade.InstanceID))
                 _liveHazards.Add(blade);
         }
-        foreach (var instanceID in _observedBladeIDs)
+        foreach (var instanceID in _helperLastSeen.Keys)
         {
             if (WorldState.Actors.Find(instanceID) is { } helper && !helper.IsDeadOrDestroyed && seen.Add(instanceID))
                 _liveHazards.Add(helper);
         }
         return _liveHazards.ToArray();
     }
+
+    private static bool IsBladeResolution(uint actionID) => actionID is
+        (uint)AID.UnbowedSpirit or
+        (uint)AID.InspiritedCyclone or
+        (uint)AID.InspiritedCrosswinds or
+        (uint)AID.InspiritedHurricaneCircle or
+        (uint)AID.InspiritedHurricaneCross or
+        (uint)AID.Gale or
+        (uint)AID.AncientAero;
 
     private void AddBlade(Actor blade)
     {
@@ -198,9 +230,16 @@ sealed class BladePatterns(BossModule module) : Components.GenericAOEs(module)
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         base.AddAIHints(slot, actor, assignment, hints);
-        var risky = ActiveAOEs(slot, actor).ToArray().Where(aoe => aoe.Risky).ToArray();
+        var aoes = ActiveAOEs(slot, actor).ToArray();
+        var risky = aoes.Where(aoe => aoe.Risky).ToArray();
         if (risky.Length != 0)
             hints.GoalZones.Add(position => risky.All(aoe => !aoe.Check(position)) ? 20f : 0f);
+
+        if (_pending.Count != 0 && _pending[0].ActionID == (uint)AID.InspiritedImpact)
+        {
+            var staging = _displayed.Where(aoe => !aoe.Risky).LastOrDefault();
+            hints.GoalZones.Add(position => staging.Shape != null && staging.Check(position) && risky.All(aoe => !aoe.Check(position)) ? 40f : 0f);
+        }
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
