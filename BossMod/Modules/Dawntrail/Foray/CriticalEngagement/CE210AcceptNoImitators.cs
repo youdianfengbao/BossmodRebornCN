@@ -323,12 +323,13 @@ sealed class HellwardBound(BossModule module) : Components.GenericAOEs(module)
 
         var p = spell.LocXZ - Arena.Center;
         var p90 = p.OrthoL();
-        // 四连冲共 4 段 (5 点): 中心->落点, 落点->R90, R90->-R90, -R90->-p.
-        WPos[] points = [Arena.Center, Arena.Center + p, Arena.Center + p90, Arena.Center - p90, Arena.Center - p];
+        // The named four-part sequence starts with BCD7's non-damaging movement. Only the following
+        // three BCD8 paths are lethal; queuing center->p shifts every warning one hit late.
+        WPos[] points = [Arena.Center + p, Arena.Center + p90, Arena.Center - p90, Arena.Center - p];
         var firstActivation = Module.CastFinishAt(spell).AddSeconds(FirstDashDelay);
-        for (var i = 0; i < 4; ++i)
+        for (var i = 0; i < 3; ++i)
             AddLane(points[i], points[i + 1], firstActivation.AddSeconds(i * DashInterval), caster.InstanceID);
-        _phaseExpires = firstActivation.AddSeconds(3d * DashInterval + FinalDashGrace);
+        _phaseExpires = firstActivation.AddSeconds(2d * DashInterval + FinalDashGrace);
         Service.Logger.Information($"[CE210] HellwardBound lanes={_lanes.Count} p=({p.X:f1},{p.Z:f1}) firstAct={firstActivation:O}");
     }
 
