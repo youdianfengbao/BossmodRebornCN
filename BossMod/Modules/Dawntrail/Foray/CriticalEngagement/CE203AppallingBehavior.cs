@@ -110,7 +110,11 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
             var origin = source?.Position ?? pending.Origin;
             // 学习指令的锥在 Pallkeeper 传送 (磁场转换) 后必须朝向场中, 而不是沿用 Pallkeeper 的
             // 旧朝向 - 否则 Swap 后锥形指令会画错方向.
-            var rotation = pending.FollowCaster && pending.ActionID is (uint)AID.BadBreathInstruction or (uint)AID.BadBreathAOE
+            // C271 is an edge-origin learned instruction whose helper can retain the old facing
+            // after a keeper swap, so re-aim that preview toward the arena center. C53B is the
+            // normal center-origin breath; its helper rotation is the actual cast direction and
+            // must not be replaced with Angle.FromDirection(center - center).
+            var rotation = pending.FollowCaster && pending.ActionID == (uint)AID.BadBreathInstruction
                 ? Angle.FromDirection(Module.Arena.Center - origin)
                 : source?.Rotation ?? pending.Rotation;
             var imminent = pending.Activation <= riskyDeadline;
@@ -310,9 +314,16 @@ sealed class AppallingAOEs(BossModule module) : Components.GenericAOEs(module)
 sealed class ElectricBoundary(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeDonut Shape = new(19.5f, 25f);
+    // The walkable arena ends at 20y, but a 19.5y AI boundary leaves the player hitbox and
+    // pathfinder interpolation sitting on the lethal fence. Keep a 1.5y movement cushion while
+    // retaining the narrower 19-20y visual band for the actual arena outline.
+    private static readonly AOEShapeDonut AIShape = new(18.5f, 25f);
     private readonly AOEInstance[] _aoe = [new(Shape, module.Arena.Center)];
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+        => hints.AddForbiddenZone(AIShape, Arena.Center);
 
     public override void DrawArenaBackground(int pcSlot, Actor pc)
     {
@@ -362,21 +373,22 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
         // The center cell is unconditional and must be available from the roulette cast even if
         // one of the four sector helpers has not spawned/streamed in yet.
         Add(CenterCell, default, true);
+        // EAnim on the two guide objects is the authoritative early direction signal. Do not
+        // require the replay-specific boss+37..40 helper IDs before exposing the sectors: those
+        // IDs can shift when the client creates extra helpers, which previously left AI with only
+        // the center circle and caused it to hug the boss until the hit packet.
         var inner1 = Helper(37);
         var inner2 = Helper(38);
         var outer1 = Helper(39);
         var outer2 = Helper(40);
-        if (inner1 == null || inner2 == null || outer1 == null || outer2 == null)
-            return CollectionsMarshal.AsSpan(_displayed);
-
         if (_innerDirection is { } inner && _outerDirection is { } outer)
         {
-            Add(InnerCell, inner, true, inner1.InstanceID);
-            Add(InnerCell, inner + 180f.Degrees(), true, inner2.InstanceID);
-            Add(OuterCell, outer, true, outer1.InstanceID);
-            Add(OuterCell, outer + 180f.Degrees(), true, outer2.InstanceID);
+            Add(InnerCell, inner, true, inner1?.InstanceID ?? 0);
+            Add(InnerCell, inner + 180f.Degrees(), true, inner2?.InstanceID ?? 0);
+            Add(OuterCell, outer, true, outer1?.InstanceID ?? 0);
+            Add(OuterCell, outer + 180f.Degrees(), true, outer2?.InstanceID ?? 0);
         }
-        else
+        else if (inner1 != null && inner2 != null && outer1 != null && outer2 != null)
         {
             UpdateDirectionFreshness(inner1, inner2, outer1, outer2);
             if (_directionsFresh)
@@ -388,6 +400,23 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
             }
         }
         return CollectionsMarshal.AsSpan(_displayed);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+
+        if (!_armed || _innerDirection is not { } inner || _outerDirection is not { })
+            return;
+
+        // Give the pathfinder a concrete destination band in the safe part of the inner ring.
+        // Without a goal, NormalMovement adds the melee target (the boss at the center) and the
+        // future-dated forbidden cells alone do not pull the player out early enough.
+        var innerSafe = inner;
+        var innerOpposite = inner + 180f.Degrees();
+        hints.GoalZones.Add(position => position.InDonut(Arena.Center, 7f, 10f)
+            && !InnerCell.Check(position, Arena.Center, innerSafe)
+            && !InnerCell.Check(position, Arena.Center, innerOpposite) ? 10f : 0f);
     }
 
     public override void AddGlobalHints(GlobalHints hints)
