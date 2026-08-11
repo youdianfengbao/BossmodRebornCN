@@ -26,29 +26,396 @@ sealed class SealedImplementsNear(BossModule module) : Components.SimpleAOEs(mod
     }
 }
 
-// 元素球：4B64 冰/4B65 火/4B66 雷球（模型 R1.5）在 4 个固定点位（R20.5）+ 南北 2 点位生成，类型/组合随机，
-// 同类配对 tether（363/364/365）约 10s 后消失。球无读条无伤害事件，判定半径未知（回放实测玩家全程躲球），
-// 暂只绘制 R15 影响圈（risky=false，不参与 AI 禁区），待后续确认伤害半径再补引导
-sealed class ElementBalls(BossModule module) : Components.GenericAOEs(module)
+// 元素地板（字典）：1EC008 火 / 1EC009 冰 / 1EC00A 雷 地板实体（EventObj，位于场地中心），每轮元素控制（48394）
+// 布置时重新生成并写入 rotation（回放 08-11：一轮 rot 火0/雷60/冰120、二轮 火120/雷0/冰60——每轮重新布置，动态读取）。
+// 台子方向校准（回放 08-11 两轮验证）：BossMod 台子方向 = 地板游戏 rotation + 180°（对侧 +180°，与 spell.Rotation 同换算）
+sealed class ElementFloor(BossModule module) : BossComponent(module)
 {
-    private static readonly AOEShapeCircle Shape = new(15f);
-    private readonly List<AOEInstance> _displayed = [with(8)];
-
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    // 0 火 / 1 雷 / 2 冰 → BossMod 台子基方向（BossMod 角，0=南）；实时读取地板实体（每轮布置后自动反映新值）
+    public Angle? GetDir(int prop)
     {
-        _displayed.Clear();
-        foreach (var oid in new[] { (uint)OID.SwirlingOrb, (uint)OID.BallOfFire, (uint)OID.BallOfLevin })
+        var oid = prop switch
+        {
+            0 => (uint)OID.Actor1ec008, // 火地板
+            1 => (uint)OID.Actor1ec00a, // 雷地板
+            2 => (uint)OID.Actor1ec009, // 冰地板
+            _ => default
+        };
+        foreach (var f in Module.Enemies(oid))
+        {
+            if (!f.IsDeadOrDestroyed)
+            {
+                return f.Rotation + 180f.Degrees();
+            }
+        }
+        return null;
+    }
+}
+
+// 元素球 cone（2026-08-11 机制查清后重写，替换原 ElementBalls 的 R15 猜测圈）：
+// 4B64 冰 / 4B65 火 / 4B66 雷球在元素创造（48400）读条结束后生成（回放无 ACT+、仅有 COM+/TETH 事件，故用 Update 轮询检测），
+// 球顺时针旋转至同属性台子（地板）时，场地中心 Helper 对该台子方向打 Fan60 R30 cone（对侧双扇，中心=场地中心 (0,-628)）。
+// 延迟按 ACT 模板（墨汁塔普通.xml 3a/3b 触发器）：三球同现按三波 7.3/9.8/12.3s（间隔 2.5s，与 08-11 回放实测
+// 雷 7.87/冰 10.37/火 12.90 的间隔完全吻合；单波场景 ACT 3a 用 9.7s，此处统一 3b 模板首波 7.3s，实测后校准）；
+// 球到达台子（同类 Tether 363/364/365 断开）后 +0.63s cone 施放（回放实测恒定），OnUntethered 校准 activation。
+// 紧迫度：最先生效的波次 Colors.Danger，其余 Colors.AOE（参考 ArcaneBeacon 紧迫度分级）。
+sealed class ElementOrbs(BossModule module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeCone Cone = new(30f, 30f.Degrees());
+    private readonly List<AOEInstance> _aoes = [];
+    private readonly HashSet<ulong> _known = [];
+    private readonly bool[] _added = new bool[3]; // 每属性已添加（对侧双扇只画一次）
+    private readonly ulong[] _ballActor = new ulong[3]; // 每属性首球 InstanceID（Tether 校准匹配用）
+    private DateTime _spawnTime; // 本轮首次球生成时刻（波次延迟基准）
+    private int _wave;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：新一轮布置，重置状态
+        {
+            _aoes.Clear();
+            _known.Clear();
+            _added[0] = _added[1] = _added[2] = false;
+            _wave = 0;
+        }
+    }
+
+    public override void Update()
+    {
+        var floor = Module.FindComponent<ElementFloor>();
+        foreach (var oid in new[] { (uint)OID.BallOfFire, (uint)OID.BallOfLevin, (uint)OID.SwirlingOrb })
         {
             foreach (var b in Module.Enemies(oid))
             {
-                if (!b.IsDeadOrDestroyed)
+                if (b.IsDeadOrDestroyed || !_known.Add(b.InstanceID))
                 {
-                    _displayed.Add(new(Shape, b.Position, color: Colors.AOE, risky: false, actorID: b.InstanceID,
-                        shapeDistance: Shape.Distance(b.Position, default)));
+                    continue;
                 }
+
+                var prop = b.OID == (uint)OID.BallOfFire ? 0 : b.OID == (uint)OID.BallOfLevin ? 1 : 2;
+                if (_added[prop] || floor?.GetDir(prop) is not { } dir)
+                {
+                    continue;
+                }
+                _added[prop] = true;
+                _ballActor[prop] = b.InstanceID;
+
+                if (_wave == 0)
+                {
+                    _spawnTime = WorldState.CurrentTime;
+                }
+
+                ++_wave;
+                var activation = _spawnTime.AddSeconds(7.3f + (_wave - 1) * 2.5f); // ACT 模板 3b（三波 7.3/9.8/12.3；单波 3a 为 9.7s，统一此模板，实测后校准）
+                _aoes.Add(new(Cone, Module.Arena.Center, dir, activation, actorID: b.InstanceID));
+                _aoes.Add(new(Cone, Module.Arena.Center, dir + 180f.Degrees(), activation, actorID: b.InstanceID));
             }
         }
-        return CollectionsMarshal.AsSpan(_displayed);
+    }
+
+    // 球到达台子（同类 Tether 断开）→ +0.63s cone 施放（回放实测恒定），校准预判 activation
+    public override void OnUntethered(Actor source, in ActorTetherInfo tether)
+    {
+        var prop = tether.ID switch
+        {
+            (uint)TetherID.Tether_chn_m0947_t1_p => 1, // 雷 363
+            (uint)TetherID.Tether_chn_m0947_i1_p => 2, // 冰 364
+            (uint)TetherID.Tether_chn_m0947_f1_p => 0, // 火 365
+            _ => -1
+        };
+        if (prop < 0 || source.InstanceID != _ballActor[prop])
+        {
+            return;
+        }
+
+        var activation = WorldState.FutureTime(0.63d); // 断开 +0.63s
+        var len = _aoes.Count;
+        for (var i = 0; i < len; ++i)
+        {
+            if (_aoes[i].ActorID == source.InstanceID)
+            {
+                _aoes[i] = _aoes[i] with { Activation = activation };
+            }
+        }
+    }
+
+    // 紧迫度：最先生效的波次深黄（Danger+risky），其余浅黄（AOE、risky=false）——参考 ArcaneBeacon
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        var soon = DateTime.MaxValue;
+        var len = _aoes.Count;
+        for (var i = 0; i < len; ++i)
+        {
+            if (_aoes[i].Activation < soon)
+            {
+                soon = _aoes[i].Activation;
+            }
+        }
+
+        for (var i = 0; i < len; ++i)
+        {
+            var a = _aoes[i];
+            var urgent = soon != DateTime.MaxValue && a.Activation <= soon.AddSeconds(0.5f);
+            _aoes[i] = urgent ? a with { Color = Colors.Danger, Risky = true } : a with { Color = Colors.AOE, Risky = false };
+        }
+        return CollectionsMarshal.AsSpan(_aoes);
+    }
+}
+
+// 扩散环（元素展开）：环实体 1EC00B 火 / 1EC00C 冰 / 1EC00D 雷（EventObj，出现于场地中心 (0,-628)）依次出现，
+// 圆环扩大至对应属性平台中心时 boss 对该平台打 Fan60 R30 cone（origin=场地中心，方向=同属性台子=ElementFloor 字典）。
+// 环 → cone 延迟 6.7s 恒定（08-11 回放两轮五组 6.65~6.75s 实测；ACT 模板 6.5s 参考）；环间隔 慢 4.0s / 快 2.0s
+// （连续咏唱后），施放顺序 = 环出现顺序。紧迫度按 activation 分级（最先生效波次 Danger，其余 AOE）。
+sealed class ElementRings(BossModule module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeCone Cone = new(30f, 30f.Degrees());
+    private readonly List<AOEInstance> _aoes = [];
+    private readonly HashSet<ulong> _known = [];
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：新一轮布置，重置状态
+        {
+            _aoes.Clear();
+            _known.Clear();
+        }
+    }
+
+    public override void OnActorCreated(Actor actor)
+    {
+        var prop = actor.OID switch
+        {
+            (uint)OID.Actor1ec00b => 0, // 火环
+            (uint)OID.Actor1ec00d => 1, // 雷环
+            (uint)OID.Actor1ec00c => 2, // 冰环
+            _ => -1
+        };
+        if (prop < 0 || !_known.Add(actor.InstanceID))
+        {
+            return;
+        }
+
+        var dir = Module.FindComponent<ElementFloor>()?.GetDir(prop);
+        if (dir == null)
+        {
+            return;
+        }
+
+        var activation = WorldState.FutureTime(6.7d); // 环出现 → cone 6.7s（回放实测；ACT 模板 6.5s）
+        _aoes.Add(new(Cone, Module.Arena.Center, dir.Value, activation, actorID: actor.InstanceID));
+        _aoes.Add(new(Cone, Module.Arena.Center, dir.Value + 180f.Degrees(), activation, actorID: actor.InstanceID));
+    }
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        var time = WorldState.CurrentTime;
+        _aoes.RemoveAll(a => a.Activation.AddSeconds(0.5d) < time); // 爆炸后清除
+
+        var soon = DateTime.MaxValue;
+        var len = _aoes.Count;
+        for (var i = 0; i < len; ++i)
+        {
+            if (_aoes[i].Activation < soon)
+            {
+                soon = _aoes[i].Activation;
+            }
+        }
+
+        for (var i = 0; i < len; ++i)
+        {
+            var a = _aoes[i];
+            var urgent = soon != DateTime.MaxValue && a.Activation <= soon.AddSeconds(0.5f);
+            _aoes[i] = urgent ? a with { Color = Colors.Danger, Risky = true } : a with { Color = Colors.AOE, Risky = false };
+        }
+        return CollectionsMarshal.AsSpan(_aoes);
+    }
+}
+
+// 飞翔指令击退安全引导（2026-08-11 用户方案）：boss 读条飞翔指令（48403）→ 三分身（4B6F）落固定三角位
+// （北 (0,-612.5)/南西 (-13.423,-635.75)/南东 (13.423,-635.75)，R15.5）→ 分身 R15 圆击退 9y（AwayFromOrigin，用户实测）。
+// 绿色引导区（仅 AI 视觉 GoalZones，无 AOE 警戒区组件——现状即无击退预警，需求 1 无删除项）：
+// 站进引导区的玩家被 9y 击退后仍在战斗场地内（异形场地 + 内圈即死区挖洞，用 Module.Arena.InBounds 判定）；
+// 击退后位置 p' = p + 9 × normalize(p − 分身位置)；三分身各一引导区（重叠区自然叠加得分）。权重 0.5（可调）。
+sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
+{
+    private const float KnockbackDistance = 9f; // 击退距离（用户实测）
+    private const float GuideRadius = 15f; // 分身击退圆半径（圈内才被击退，引导圈与之匹配）
+    private const float Weight = 0.5f; // 引导权重（可调）
+    private readonly List<WPos> _phantomPos = [];
+    private bool _active;
+    private DateTime _expire;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.PropulsiveProphecy) // 飞翔指令读条开始：激活引导（读条 2.7s + 分身跳跃 + 击退结算，10s 窗口）
+        {
+            _active = true;
+            _expire = WorldState.FutureTime(10d);
+        }
+    }
+
+    public override void Update()
+    {
+        if (_active && WorldState.CurrentTime >= _expire)
+        {
+            _active = false;
+        }
+
+        // 轮询分身实体位置（4B6F 常驻实体，飞翔指令后落固定三角位；与 ElementOrbs 球检测同模式）
+        _phantomPos.Clear();
+        foreach (var p in Module.Enemies((uint)OID.TranscribedIndex))
+        {
+            if (!p.IsDeadOrDestroyed)
+            {
+                _phantomPos.Add(p.Position);
+            }
+        }
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (!_active || _phantomPos.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var phantom in _phantomPos)
+        {
+            // 引导区：p 在分身击退圈内（距分身 ≤ R15）且被 9y 击退（AwayFromOrigin）后仍在场地内（含即死区挖洞）→ 给分
+            hints.GoalZones.Add(p =>
+            {
+                var to = p - phantom;
+                if (to.LengthSq() > GuideRadius * GuideRadius)
+                {
+                    return 0f; // 圈外不会被击退
+                }
+                var dest = p + to.Normalized() * KnockbackDistance;
+                return Module.Arena.InBounds(dest) ? Weight : 0f;
+            });
+        }
+    }
+}
+
+// 飞翔指令击退箭头（2026-08-11 用户方案）：boss 读条飞翔指令（48403）→ 三分身（4B6F）落固定三角位
+// （北 (0,-612.5)/南西 (-13.423,-635.75)/南东 (13.423,-635.75)，R15.5）→ 分身 R15 圆击退 9y（AwayFromOrigin，用户实测）。
+// 雷达视图：仅对"距分身 15y 以内"的玩家显示击退箭头（来源=分身、距离 9f、AwayFromOrigin）；R15 圈本身由游戏 omen 显示、不画；
+// AI 视觉由 FlyingDecreeGuide 绿色引导负责。多来源：玩家位于多个分身圈内时返回多个击退（基类按顺序依次应用）。
+// 箭头绘制由 GenericKnockback 基类 DrawArenaForeground 自动完成（黄线 + 落点）。
+sealed class FlyingDecreeKnockbacks(BossModule module) : Components.GenericKnockback(module)
+{
+    private const float KnockbackDistance = 9f; // 击退距离（用户实测）
+    private const float CircleRadius = 15f; // 分身击退圆半径（圈内玩家被击退）
+    private readonly List<WPos> _phantomPos = [];
+    private readonly List<Knockback> _knockbacks = [with(4)];
+    private bool _active;
+    private DateTime _expire;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.PropulsiveProphecy) // 飞翔指令读条开始：激活（2.7s 读条 + 分身跳跃 + 击退结算，10s 窗口）
+        {
+            _active = true;
+            _expire = WorldState.FutureTime(10d);
+        }
+    }
+
+    public override void Update()
+    {
+        if (_active && WorldState.CurrentTime >= _expire)
+        {
+            _active = false;
+        }
+
+        // 轮询分身实体位置（4B6F 常驻实体，飞翔指令后落固定三角位；与 FlyingDecreeGuide 同模式）
+        _phantomPos.Clear();
+        foreach (var p in Module.Enemies((uint)OID.TranscribedIndex))
+        {
+            if (!p.IsDeadOrDestroyed)
+            {
+                _phantomPos.Add(p.Position);
+            }
+        }
+    }
+
+    // 圈内玩家（距分身 ≤ 15y）显示击退箭头；圈外不显示；多圈内返回多个来源（基类按顺序依次应用）
+    public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor)
+    {
+        _knockbacks.Clear();
+        if (!_active)
+        {
+            return CollectionsMarshal.AsSpan(_knockbacks);
+        }
+
+        var count = _phantomPos.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            if ((actor.Position - _phantomPos[i]).LengthSq() <= CircleRadius * CircleRadius)
+            {
+                _knockbacks.Add(new(_phantomPos[i], KnockbackDistance, WorldState.CurrentTime, kind: Kind.AwayFromOrigin));
+            }
+        }
+        return CollectionsMarshal.AsSpan(_knockbacks);
+    }
+}
+
+// 元素机制 AI 提前等待引导（2026-08-11 用户方案）：元素阶段（球 cone / 环 cone）扇形 AOE 从场地中心向
+// 六等分台子方向（0/60/120/180/240/300°）打 Fan60 R30——AI 提前站到两个相邻扇形交界处等待，
+// 预警一出只需一步跨到安全侧（符合玩家操作习惯）。
+// 交界点 = 六等分中间角方向（30/90/150/210/270/330°）@ Radius 20y（R30 覆盖到 30y，20y 处正站在两扇之间；可调）。
+// 激活：元素控制（48394）读条开始 → 窗口 12s（覆盖整轮元素阶段：创造/球 + 展开/环；超时或下一轮自动重置）。
+// 权重 1.0f（高于 CenterGoal 的 0.1——元素阶段优先交界点；窗口过期后 AI 回到中心弱引导）。
+// 得分 = 到 6 个交界点最近距离 ≤ 2.5f → 1.0f（取 min 避免多目标叠加糊权重）。
+sealed class ElementWaitGuide(BossModule module) : BossComponent(module)
+{
+    private const float Radius = 20f; // 交界点距场地中心距离（可调；R30 cone 覆盖到 30y，20y 处站在两扇之间）
+    private const float AcceptRadius = 2.5f; // 交界点判定半径（可调）
+    private const float Weight = 1.0f; // 引导权重（高于 CenterGoal 0.1，元素阶段优先交界点）
+    private readonly WPos[] _spots = new WPos[6];
+    private bool _active;
+    private DateTime _expire;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：激活整轮元素阶段
+        {
+            _active = true;
+            _expire = WorldState.FutureTime(12d);
+            var center = Module.Arena.Center;
+            for (var i = 0; i < 6; ++i)
+            {
+                _spots[i] = center + (30f + 60f * i).Degrees().ToDirection() * Radius; // 六等分中间角（台子方向之间）
+            }
+        }
+    }
+
+    public override void Update()
+    {
+        if (_active && WorldState.CurrentTime >= _expire)
+        {
+            _active = false; // 窗口过期：AI 回到中心弱引导
+        }
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (!_active)
+        {
+            return;
+        }
+
+        hints.GoalZones.Add(p =>
+        {
+            var best = float.MaxValue;
+            for (var i = 0; i < 6; ++i)
+            {
+                var d = (p - _spots[i]).LengthSq();
+                if (d < best)
+                {
+                    best = d;
+                }
+            }
+            return best <= AcceptRadius * AcceptRadius ? Weight : 0f;
+        });
     }
 }
 

@@ -42,6 +42,8 @@ public enum AID : uint
 
     SeveredFireIII = 47465, // Necrophobia->self, 5.2s cast, range 18 circle：魔具联动：爆炎（钢铁，与屏障头 47468 同步）
     SeveredBlizzardIII = 47466, // Necrophobia->self, 5.2s cast, range 45 width 15 cross：魔具联动：冰封（十字，与屏障头 47469 同步）
+    SeveredThunderIII = 47467, // Necrophobia->self, 4.4s cast：魔具联动：暴雷（本体读条，无直接伤害；伤害来自 Helper 50357 四扇形，2026-08-11 回放实测）
+    SeveredThunder = 50357, // NecrophobiaHelper->self, 5.2s cast, range 60 45.000-degree cone：魔具联动：暴雷（4 个 Helper 同毫秒读条、均在 boss 位置，rotation 间隔 90° 四方向，伤害本体；与本体 47467 同步，2026-08-11 回放实测）
 
     DarkCurrent = 47476, // Necrophobia->self, 3.9s cast：黑暗奔流引导（无伤害）
     DarkCurrent1 = 47477, // NecrophobiaHelper->self, 5.2s cast, range 60 width 10 rect：黑暗奔流第一段（中心在 boss 前方 30）

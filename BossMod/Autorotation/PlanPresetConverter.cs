@@ -25,15 +25,28 @@ public static class PlanPresetConverter
     // returns always 1 element for plans, or multiple (1 per preset) for preset database
     private static IEnumerable<JsonObject> EnumerateEntriesModules(JsonNode root, bool plan)
     {
+        // 键名用 "Modules"（与 JsonPresetConverter 的 nameof(Preset.Modules) 序列化键一致；汉化勿改此协议键）
+        // 防御：第三方（如 AutoDuty IPC）传入的 JSON 缺模块键/元素为 null 时跳过，不抛异常
         if (plan)
         {
-            yield return root!["模块"]!.AsObject();
+            if (root?["Modules"] is { } modules)
+            {
+                yield return modules.AsObject();
+            }
         }
         else
         {
-            foreach (var preset in root.AsArray())
+            if (root is not JsonArray arr)
             {
-                yield return preset!["模块"]!.AsObject();
+                yield break;
+            }
+
+            foreach (var preset in arr)
+            {
+                if (preset?["Modules"] is { } modules)
+                {
+                    yield return modules.AsObject();
+                }
             }
         }
     }

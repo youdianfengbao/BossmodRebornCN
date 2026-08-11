@@ -59,6 +59,10 @@ sealed class SeveredFire(BossModule module) : Components.SimpleAOEGroups(module,
 // 魔具联动：冰封（本体 47466 十字 + 屏障头 47469 十字，同步读条 5.2s，半臂 45、半宽 7.5、全长 90，实测确认十字更大）。对照 ACT（2026-08-07）：B96A omen=Rect2 Scale=7.5,45,1 cross（原 45 为全长，现半臂 45 全长 90，以国服实测为准）
 sealed class SeveredBlizzard(BossModule module) : Components.SimpleAOEGroups(module, [(uint)AID.SeveredBlizzardIII, (uint)AID.AncientBlizzardIII1], new AOEShapeCross(45f, 7.5f));
 
+// 魔具联动：暴雷（本体 47467 读条 + 4 个 Helper 50357 在 boss 位置放 4 个 R60 45° 扇形、rotation 间隔 90°，同步读条 5.2s；
+// 屏障头 47471 扇形由 SeveringHeadThunder 处理。2026-08-11 回放实测：4 Helper 同毫秒读条、CastLocation=boss 位置，玩家受击确认）
+sealed class SeveredThunder(BossModule module) : Components.SimpleAOEs(module, (uint)AID.SeveredThunder, new AOEShapeCone(60f, 22.5f.Degrees()), maxCasts: 4);
+
 // 灭亡射线：8 个屏障头同时读条 4.7s，各自发射 Rect 3x30（range 30 width 6：向前 30、半宽 3、向后 0，从屏障头位置沿朝向延伸 30 米）。对照 ACT（2026-08-07）：B973 omen=Rect Scale=3,30,1（t=4.7，总长 30 宽 6 吻合）
 sealed class DeathlyRay(BossModule module) : Components.SimpleAOEs(module, (uint)AID.DeathlyRay, new AOEShapeRect(30f, 3f, 0f));
 
