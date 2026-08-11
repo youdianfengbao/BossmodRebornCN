@@ -142,6 +142,9 @@ sealed class ElementOrbs(BossModule module) : Components.GenericAOEs(module)
     // 紧迫度：最先生效的波次深黄（Danger+risky），其余浅黄（AOE、risky=false）——参考 ArcaneBeacon
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
+        var time = WorldState.CurrentTime;
+        _aoes.RemoveAll(a => a.Activation.AddSeconds(0.5d) < time); // 爆炸后清除（2026-08-12 修复：球 cone 结算后残留不消失，与 ElementRings 同款）
+
         var soon = DateTime.MaxValue;
         var len = _aoes.Count;
         for (var i = 0; i < len; ++i)
@@ -231,26 +234,44 @@ sealed class ElementRings(BossModule module) : Components.GenericAOEs(module)
     }
 }
 
-// 飞翔指令击退安全引导（2026-08-11 用户方案）：boss 读条飞翔指令（48403）→ 三分身（4B6F）落固定三角位
+// 飞翔指令击退安全引导（2026-08-12 修正激活窗口：元素阶段全程常显）：boss 读条飞翔指令（48403）→ 三分身（4B6F）落固定三角位
 // （北 (0,-612.5)/南西 (-13.423,-635.75)/南东 (13.423,-635.75)，R15.5）→ 分身 R15 圆击退 9y（AwayFromOrigin，用户实测）。
-// 绿色引导区（仅 AI 视觉 GoalZones，无 AOE 警戒区组件——现状即无击退预警，需求 1 无删除项）：
-// 站进引导区的玩家被 9y 击退后仍在战斗场地内（异形场地 + 内圈即死区挖洞，用 Module.Arena.InBounds 判定）；
-// 击退后位置 p' = p + 9 × normalize(p − 分身位置)；三分身各一引导区（重叠区自然叠加得分）。权重 0.5（可调）。
+// 绿色引导区（仅 AI 视觉 GoalZones，无 AOE 警戒区组件）：站进引导区的玩家被 9y 击退后仍在战斗场地内
+// （异形场地 + 内圈即死区挖洞，用 Module.Arena.InBounds 判定）；击退后位置 p' = p + 9 × normalize(p − 分身位置)；
+// 三分身各一引导区（重叠区自然叠加得分）。权重 0.5（可调）。
+// 窗口（与 ElementWaitGuide 一致）：48394 元素控制读条开始激活 → 48401/48905 元素整合读条结束停用，兜底 100s——
+// 绿色引导在元素阶段全程存在；boss 读条封印武器等机制时 AOE 禁区（ForbiddenZone）覆盖部分绿色区域，
+// AI 自动前往剩余绿色安全区（ForbiddenZone 避开 + GoalZones 得分天然交互，无需额外逻辑）。
 sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
 {
     private const float KnockbackDistance = 9f; // 击退距离（用户实测）
     private const float GuideRadius = 15f; // 分身击退圆半径（圈内才被击退，引导圈与之匹配）
     private const float Weight = 0.5f; // 引导权重（可调）
-    private readonly List<WPos> _phantomPos = [];
+    // 分身固定三角位（2026-08-12 修复：回放 08-11 两轮位置一致；分身跳跃（48404）前尚在场地中心 (0,-628)，
+    // 轮询实时位置会把引导区画在中心导致"三角位绿色引导不显示"，故用固定位）
+    private static readonly WPos[] PhantomPositions =
+    [
+        new(0f, -612.5f), // 北
+        new(-13.423f, -635.75f), // 南西
+        new(13.423f, -635.75f), // 南东
+    ];
     private bool _active;
     private DateTime _expire;
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.PropulsiveProphecy) // 飞翔指令读条开始：激活引导（读条 2.7s + 分身跳跃 + 击退结算，10s 窗口）
+        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：激活引导（与 ElementWaitGuide 同窗口，元素阶段全程常显）
         {
             _active = true;
-            _expire = WorldState.FutureTime(10d);
+            _expire = WorldState.FutureTime(100d); // 兜底窗口（正常由元素整合读条结束停用）
+        }
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID is (uint)AID.ElementaryChemistry or (uint)AID.UnknownWeaponskill2) // 元素整合读条结束：元素阶段收尾完成 → 停用引导
+        {
+            _active = false;
         }
     }
 
@@ -260,26 +281,16 @@ sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
         {
             _active = false;
         }
-
-        // 轮询分身实体位置（4B6F 常驻实体，飞翔指令后落固定三角位；与 ElementOrbs 球检测同模式）
-        _phantomPos.Clear();
-        foreach (var p in Module.Enemies((uint)OID.TranscribedIndex))
-        {
-            if (!p.IsDeadOrDestroyed)
-            {
-                _phantomPos.Add(p.Position);
-            }
-        }
     }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (!_active || _phantomPos.Count == 0)
+        if (!_active)
         {
             return;
         }
 
-        foreach (var phantom in _phantomPos)
+        foreach (var phantom in PhantomPositions)
         {
             // 引导区：p 在分身击退圈内（距分身 ≤ R15）且被 9y 击退（AwayFromOrigin）后仍在场地内（含即死区挖洞）→ 给分
             hints.GoalZones.Add(p =>
@@ -305,17 +316,32 @@ sealed class FlyingDecreeKnockbacks(BossModule module) : Components.GenericKnock
 {
     private const float KnockbackDistance = 9f; // 击退距离（用户实测）
     private const float CircleRadius = 15f; // 分身击退圆半径（圈内玩家被击退）
-    private readonly List<WPos> _phantomPos = [];
+    // 分身固定三角位（2026-08-12 修复：与 FlyingDecreeGuide 同根因——分身跳跃（48404）前尚在场地中心，
+    // 轮询实时位置会导致圈/箭头画在中心，改用固定位；回放 08-11 两轮位置一致）
+    private static readonly WPos[] PhantomPositions =
+    [
+        new(0f, -612.5f), // 北
+        new(-13.423f, -635.75f), // 南西
+        new(13.423f, -635.75f), // 南东
+    ];
     private readonly List<Knockback> _knockbacks = [with(4)];
     private bool _active;
     private DateTime _expire;
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.PropulsiveProphecy) // 飞翔指令读条开始：激活（2.7s 读条 + 分身跳跃 + 击退结算，10s 窗口）
+        if (spell.Action.ID == (uint)AID.PropulsiveProphecy) // 飞翔指令读条开始：激活（圣枪 4B62 常驻非触发点，以 48403 为准）
         {
             _active = true;
-            _expire = WorldState.FutureTime(10d);
+            _expire = WorldState.FutureTime(60d); // 兜底窗口（正常由冲击波读条结束停用）
+        }
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID is (uint)AID.Shockwave1 or (uint)AID.Shockwave) // 冲击波 48405/48406 读条结束：飞翔阶段结束 → 停用
+        {
+            _active = false;
         }
     }
 
@@ -324,16 +350,6 @@ sealed class FlyingDecreeKnockbacks(BossModule module) : Components.GenericKnock
         if (_active && WorldState.CurrentTime >= _expire)
         {
             _active = false;
-        }
-
-        // 轮询分身实体位置（4B6F 常驻实体，飞翔指令后落固定三角位；与 FlyingDecreeGuide 同模式）
-        _phantomPos.Clear();
-        foreach (var p in Module.Enemies((uint)OID.TranscribedIndex))
-        {
-            if (!p.IsDeadOrDestroyed)
-            {
-                _phantomPos.Add(p.Position);
-            }
         }
     }
 
@@ -346,12 +362,12 @@ sealed class FlyingDecreeKnockbacks(BossModule module) : Components.GenericKnock
             return CollectionsMarshal.AsSpan(_knockbacks);
         }
 
-        var count = _phantomPos.Count;
+        var count = PhantomPositions.Length;
         for (var i = 0; i < count; ++i)
         {
-            if ((actor.Position - _phantomPos[i]).LengthSq() <= CircleRadius * CircleRadius)
+            if ((actor.Position - PhantomPositions[i]).LengthSq() <= CircleRadius * CircleRadius)
             {
-                _knockbacks.Add(new(_phantomPos[i], KnockbackDistance, WorldState.CurrentTime, kind: Kind.AwayFromOrigin));
+                _knockbacks.Add(new(PhantomPositions[i], KnockbackDistance, WorldState.CurrentTime, kind: Kind.AwayFromOrigin));
             }
         }
         return CollectionsMarshal.AsSpan(_knockbacks);
@@ -362,8 +378,10 @@ sealed class FlyingDecreeKnockbacks(BossModule module) : Components.GenericKnock
 // 六等分台子方向（0/60/120/180/240/300°）打 Fan60 R30——AI 提前站到两个相邻扇形交界处等待，
 // 预警一出只需一步跨到安全侧（符合玩家操作习惯）。
 // 交界点 = 六等分中间角方向（30/90/150/210/270/330°）@ Radius 20y（R30 覆盖到 30y，20y 处正站在两扇之间；可调）。
-// 激活：元素控制（48394）读条开始 → 窗口 12s（覆盖整轮元素阶段：创造/球 + 展开/环；超时或下一轮自动重置）。
-// 权重 1.0f（高于 CenterGoal 的 0.1——元素阶段优先交界点；窗口过期后 AI 回到中心弱引导）。
+// 激活：元素控制（48394）读条开始；停用：元素整合（48401 本体 / 48905 Helper，任一个读完）读条结束——
+// 元素阶段收尾完成即停用（避免与后续 FlyingDecreeGuide 分身引导冲突，交界点权重 1.0 会压过分身 0.5）。
+// 兜底窗口 100s（48394 开始起算；回放 08-11：球机制 +54~71s、环机制 +72~81s，100s 覆盖整轮元素阶段，防事件缺失）。
+// 权重 1.0f（高于 CenterGoal 的 0.1——元素阶段优先交界点；停用后 AI 回到中心弱引导）。
 // 得分 = 到 6 个交界点最近距离 ≤ 2.5f → 1.0f（取 min 避免多目标叠加糊权重）。
 sealed class ElementWaitGuide(BossModule module) : BossComponent(module)
 {
@@ -379,7 +397,7 @@ sealed class ElementWaitGuide(BossModule module) : BossComponent(module)
         if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：激活整轮元素阶段
         {
             _active = true;
-            _expire = WorldState.FutureTime(12d);
+            _expire = WorldState.FutureTime(100d); // 兜底窗口（回放：球/环机制在 48394 后 54~81s，100s 覆盖整轮；正常由元素整合读完停用）
             var center = Module.Arena.Center;
             for (var i = 0; i < 6; ++i)
             {
@@ -388,11 +406,19 @@ sealed class ElementWaitGuide(BossModule module) : BossComponent(module)
         }
     }
 
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID is (uint)AID.ElementaryChemistry or (uint)AID.UnknownWeaponskill2) // 元素整合读条结束：元素阶段收尾完成 → 停用
+        {
+            _active = false;
+        }
+    }
+
     public override void Update()
     {
         if (_active && WorldState.CurrentTime >= _expire)
         {
-            _active = false; // 窗口过期：AI 回到中心弱引导
+            _active = false; // 兜底窗口过期：AI 回到中心弱引导
         }
     }
 
@@ -427,12 +453,73 @@ sealed class ElementaryChemistryRects(BossModule module) : ReplayValidatedCastAO
         => actionID == (uint)AID.UnknownWeaponskill2 ? new(new AOEShapeRect(15f, 7.5f)) : null;
 }
 
-// 圣枪冲击波：3 圣枪 4B62 固定三角位（(0,-612.5)/(±13.423,-635.75)）同步读条 48405（5.0s），
-// 以圣枪位为圆心 R15（回放实测：玩家聚集中心北侧时仅北枪覆盖，南两枪距离 >15 不覆盖）
-sealed class HolyLanceShockwaves(BossModule module) : ReplayValidatedCastAOEs(module)
+// 圣枪冲击波击退箭头（2026-08-12 用户最终需求）：3 圣枪 4B62 固定三角位（(0,-612.5)/(±13.423,-635.75)）
+// + 6 Helper 233C 同位置同步读条 48405（圣枪版）/ 48406（Helper 版）4.7s——以施法者位置为圆心 R15 圈内玩家
+// 被从中心向外击退（AwayFromOrigin；回放实测：玩家聚集中心北侧时仅北枪覆盖，南两枪距离 >15 不覆盖）。
+// 视觉方案（与 FlyingDecreeKnockbacks 同款模式）：仅雷达击退箭头——距任一冲击波中心 ≤15y 的玩家显示
+// 以该中心为起点的箭头，圈外无箭头；不画 AOE 圈（游戏 omen 自带）；AI 视觉禁用：不继承 AoE 组件、
+// GenericKnockback 基类无 AddAIHints 禁区（仅画箭头），48405/48406 均不生成 ForbiddenZone。
+// 同位置多施法者去重（圣枪+Helper 成对同位置同批，只记一次中心）。
+// 清理：冲击波读条结束（OnCastFinished 48405/48406）移除对应中心；元素控制（48394）读条开始重置；Update 兜底过期。
+sealed class HolyLanceShockwaves(BossModule module) : Components.GenericKnockback(module)
 {
-    protected override AOEConfig? ConfigFor(uint actionID)
-        => actionID == (uint)AID.Shockwave1 ? new(new AOEShapeCircle(15f)) : null;
+    private const float KnockbackDistance = 10f; // 击退距离（上游 PropulsiveShockwave 实测 10f，可调）
+    private const float CircleRadius = 15f; // 冲击波击退圆半径（圈内玩家被击退，回放实测）
+    private readonly List<(WPos Origin, DateTime Activation)> _centers = [with(6)]; // 去重后的冲击波中心（施法者位置）
+    private readonly List<Knockback> _knockbacks = [with(3)]; // 当前玩家击退列表（每中心至多一个）
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：新一轮重置
+        {
+            _centers.Clear();
+        }
+        else if (spell.Action.ID is (uint)AID.Shockwave1 or (uint)AID.Shockwave)
+        {
+            if (spell.EventHappened)
+            {
+                return;
+            }
+            var activation = Module.CastFinishAt(spell);
+            var origin = caster.Position;
+            if (_centers.Any(c => (c.Origin - origin).LengthSq() < 1f && Math.Abs((c.Activation - activation).TotalSeconds) < 1d))
+            {
+                return; // 同位置同批施法者（圣枪+Helper 成对）：去重只记一次
+            }
+            _centers.Add((origin, activation));
+        }
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID is (uint)AID.Shockwave1 or (uint)AID.Shockwave)
+        {
+            _centers.RemoveAll(c => c.Origin.AlmostEqual(caster.Position, 0.5f)); // 读条结束：移除对应中心（箭头消失）
+        }
+    }
+
+    public override void Update()
+    {
+        _centers.RemoveAll(c => WorldState.CurrentTime > c.Activation.AddSeconds(1d)); // 兜底过期（正常由 OnCastFinished 移除）
+        base.Update();
+    }
+
+    // 圈内玩家（距任一冲击波中心 ≤ 15y）显示以该中心为起点的击退箭头；圈外无箭头；
+    // 位于多个中心圈内时返回多个击退（基类按顺序依次应用）；箭头绘制由基类 DrawArenaForeground 自动完成（黄线+落点）
+    public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor)
+    {
+        _knockbacks.Clear();
+        var count = _centers.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            var c = _centers[i];
+            if ((actor.Position - c.Origin).LengthSq() <= CircleRadius * CircleRadius)
+            {
+                _knockbacks.Add(new(c.Origin, KnockbackDistance, WorldState.CurrentTime, kind: Kind.AwayFromOrigin));
+            }
+        }
+        return CollectionsMarshal.AsSpan(_knockbacks);
+    }
 }
 
 // 二连召唤·封印武器连招斩击：本体 48390 读条同时 Helper 48391 镰鼬之风 ×3（方向 180/-60/60），
@@ -502,14 +589,97 @@ sealed class AllKnowingFlamesSpread(BossModule module) : Components.GenericAOEs(
 
 // 预言：本体 48412 读条后生成预言现象 4B63 ×3（初始 120° 分布 R9），瞬移至落点后 0.5s 读条：
 // 48413 陨石 R10 ×2 @ 南侧 (±13.4,-635.8)、48414 天崩地裂 R5-15 donut ×1 @ 北侧 (0,-612.5)（回放实测）
+// 预言（48412）：boss 读条 → 预言现象 4B63 ×3 出现（状态 2552 extra：0x44C=天崩月环/0x44D=陨石）并连线
+// Index2 4B72（Tether 88，Index2 位置 = 落点台位）→ 4B63 移至落点 → ~10s 后 0.2s 快读条 48413 陨石/48414 天崩。
+// 读条仅 0.2s 来不及反应，须依赖前置事件提前预警（ACT 对照：23: Tether 88 行 + 实体状态堆栈 0x9F8==0x44C
+// 判月环 → t=9.4s；回放 08-11 实测 Tether→生效 ~10.2s，可校准）：
+// - OnTethered（88，source=Index2 4B72）记录落点 = Index2 位置
+// - OnStatusGain（2552，extra 0x44C 天崩 Donut 5-15 / 0x44D 陨石 Circle R10）记录类型
+// - Update 补添前置项（Tether 与状态同毫秒到达、顺序不定；落点+类型齐备且未添加时添加）
+// - 前置项：origin=Index2 落点、activation=前置时刻+9.4s、risky=true（AI 提前避开）、浅黄视觉；
+//   0.2s 读条到达时移除同落点前置项（读条精确项由基类接管，防双显示）；Activation+0.5s 过期清除；48394 重置。
 sealed class ProphecyMeteors(BossModule module) : ReplayValidatedCastAOEs(module)
 {
+    private static readonly AOEShapeCircle StarfallShape = new(10f);
+    private static readonly AOEShapeDonut CleansingShape = new(5f, 15f);
+    private readonly List<AOEInstance> _preview = [with(6)]; // 前置预警项（读条项由基类管理）
+    private readonly Dictionary<ulong, WPos> _targets = []; // 预言现象 InstanceID → 落点（Index2 位置）
+    private readonly Dictionary<ulong, ushort> _types = []; // 预言现象 InstanceID → 状态 extra
+    private readonly HashSet<ulong> _previewed = []; // 已添加前置项的预言现象
+    private readonly List<AOEInstance> _displayed = [with(12)]; // 合并列表（读条项 + 前置项）
+
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
-        (uint)AID.Starfall => new(new AOEShapeCircle(10f)),
-        (uint)AID.Cleansing => new(new AOEShapeDonut(5f, 15f)),
+        (uint)AID.Starfall => new(StarfallShape),
+        (uint)AID.Cleansing => new(CleansingShape),
         _ => null
     };
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：新一轮重置
+        {
+            _preview.Clear();
+            _targets.Clear();
+            _types.Clear();
+            _previewed.Clear();
+        }
+        else if (spell.Action.ID is (uint)AID.Starfall or (uint)AID.Cleansing)
+        {
+            // 0.2s 快读条到达：移除同落点前置项（读条精确项由基类接管，防双显示）
+            _preview.RemoveAll(a => a.Origin.AlmostEqual(caster.Position, 0.5f));
+        }
+        base.OnCastStarted(caster, spell);
+    }
+
+    // 预言现象（4B63）连线 Index2（4B72）：记录落点 = Index2 位置（台位，与生效落点一致）
+    public override void OnTethered(Actor source, in ActorTetherInfo tether)
+    {
+        if (source.OID == (uint)OID.Index2 && tether.ID == (uint)TetherID.Tether_chn_m0361_mainte_1i)
+        {
+            _targets[tether.Target] = source.Position;
+        }
+    }
+
+    // 预言现象状态 2552：extra 0x44C=天崩（月环）/ 0x44D=陨石
+    public override void OnStatusGain(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == (uint)SID.UnknownStatus)
+        {
+            _types[actor.InstanceID] = status.Extra;
+        }
+    }
+
+    public override void Update()
+    {
+        // Tether 与状态同毫秒到达、顺序不定：落点+类型齐备且未添加的预言现象补添前置项
+        foreach (var (id, extra) in _types)
+        {
+            if (_previewed.Add(id) && _targets.TryGetValue(id, out var origin))
+            {
+                AOEShape shape = extra == 0x44C ? CleansingShape : StarfallShape; // 0x44C 天崩（月环）/ 0x44D 陨石
+                _preview.Add(new(shape, origin, default, WorldState.FutureTime(9.4d), Colors.AOE, actorID: id, shapeDistance: shape.Distance(origin, default)));
+            }
+        }
+        base.Update();
+    }
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        var time = WorldState.CurrentTime;
+        _preview.RemoveAll(a => a.Activation.AddSeconds(0.5d) < time); // 前置项结算后清除
+
+        var baseSpan = base.ActiveAOEs(slot, actor);
+        if (_preview.Count == 0)
+        {
+            return baseSpan;
+        }
+
+        _displayed.Clear();
+        _displayed.AddRange(baseSpan);
+        _displayed.AddRange(_preview);
+        return CollectionsMarshal.AsSpan(_displayed);
+    }
 }
 
 // 异形场地周期切换（2026-08-07 用户实测修正：元素控制读条完毕生成 / 元素整合读条完毕回收）：
