@@ -162,7 +162,10 @@ sealed class BladePatterns(BossModule module) : Components.GenericAOEs(module)
     private static readonly AOEShapeCircle Circle12 = new(12f);
     private static readonly AOEShapeCross Cross8 = new(60f, 4f);
     private static readonly AOEShapeCross Cross10 = new(60f, 5f);
-    private static readonly AOEShapeRect AncientAeroRect = new(35f, 3f, 35f);
+    // ARR helpers spawn on the arena edge and face inward; Action 47540 has range 70, so this
+    // rectangle is forward-only. A symmetric 35+35 shape leaves only about half the lane inside
+    // the arena and made the visible long line look truncated.
+    private static readonly AOEShapeRect AncientAeroRect = new(70f, 3f);
     private static readonly AOEShapeCircle ImpactCircle = new(25f);
 
     private sealed class PendingAOE(uint actionID, AOEInstance aoe)
