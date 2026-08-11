@@ -1,10 +1,9 @@
-﻿namespace BossMod.Dawntrail.Foray.FATE.NH102SensualSandy;
+﻿namespace BossMod.Dawntrail.Foray.FATE.AllureOfTheOccult;
 
 public enum OID : uint {
     SensualSandy = 0x4D56,
     Helper = 0x233C,
     PoisonCloud = 0x4D57, // R1.700, x0 (spawn during fight)
-    LilithLavatera = 0x0, // R0.500, x0 (spawn during fight), None type
 }
 
 public enum AID : uint {
@@ -53,8 +52,8 @@ sealed class Burst(BossModule module) : Components.SimpleAOEs(module, (uint)AID.
 }
 
 [SkipLocalsInit]
-sealed class SensualSandyStates : StateMachineBuilder {
-    public SensualSandyStates(BossModule module) : base(module) {
+sealed class AllureOfTheOccultStates : StateMachineBuilder {
+    public AllureOfTheOccultStates(BossModule module) : base(module) {
         TrivialPhase()
             .ActivateOnEnter<PutridBreath>()
             .ActivateOnEnter<WildWildBreath>()
@@ -63,7 +62,7 @@ sealed class SensualSandyStates : StateMachineBuilder {
 }
 
 [ModuleInfo(BossModuleInfo.Maturity.Contributed,
-    StatesType = typeof(SensualSandyStates),
+    StatesType = typeof(AllureOfTheOccultStates),
     ConfigType = null, // replace null with typeof(SensualSandyConfig) if applicable
     ObjectIDType = typeof(OID),
     ActionIDType = typeof(AID),
@@ -80,4 +79,4 @@ sealed class SensualSandyStates : StateMachineBuilder {
     SortOrder = 1,
     PlanLevel = 0)]
 [SkipLocalsInit]
-public sealed class SensualSandy(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);
+public sealed class AllureOfTheOccult(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);

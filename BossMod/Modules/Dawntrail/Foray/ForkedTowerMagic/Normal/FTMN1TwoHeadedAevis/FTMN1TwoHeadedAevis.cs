@@ -108,7 +108,7 @@ sealed class StormBreath(BossModule module) : Components.GenericKnockback(module
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.Ability_1)
+        if (spell.Action.ID == (uint)AID.Ability_StormsBreathAOE)
         {
             _casters.Add(new(spell.LocXZ, 14f, Module.CastFinishAt(spell), kind: Kind.AwayFromOrigin, actorID: caster.InstanceID));
         }
@@ -116,7 +116,7 @@ sealed class StormBreath(BossModule module) : Components.GenericKnockback(module
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.Ability_1)
+        if (spell.Action.ID == (uint)AID.Ability_StormsBreathAOE)
         {
             _casters.RemoveAll(kb => kb.ActorID == caster.InstanceID);
         }

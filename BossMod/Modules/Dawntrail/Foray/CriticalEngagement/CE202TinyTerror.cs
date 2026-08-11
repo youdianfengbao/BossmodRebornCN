@@ -129,7 +129,8 @@ sealed class DiminutiveDualcast(BossModule module) : ReplayValidatedCastAOEs(mod
     };
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
-        foreach (ref readonly var aoe in ActiveAOEs(slot, actor)) {
+        var aoes = ActiveAOEs(slot, actor).ToArray();
+        foreach (ref readonly var aoe in aoes.AsSpan()) {
             if (!aoe.Risky) {
                 continue;
             }
@@ -139,6 +140,18 @@ sealed class DiminutiveDualcast(BossModule module) : ReplayValidatedCastAOEs(mod
             var activation = ReferenceEquals(aoe.Shape, Fire) ? WorldState.CurrentTime : aoe.Activation;
             hints.AddForbiddenZone(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation), activation);
         }
+
+        // 引导 AI 到当前和未来都安全的位置: 只躲 risky 会让 AI 站进第二组扇形(左右互搏)。
+        hints.GoalZones.Add(position =>
+        {
+            foreach (ref readonly var aoe in aoes.AsSpan())
+            {
+                var sd = aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation);
+                if (sd.Distance(position) <= 0)
+                    return 0f;
+            }
+            return 5f;
+        });
     }
 }
 
@@ -549,7 +562,17 @@ sealed class HolyGrowable(BossModule module) : Components.GenericKnockback(modul
         var knockbacks = ActiveKnockbacks(slot, actor);
         if (knockbacks.Length != 0) {
             ref readonly var knockback = ref knockbacks[0];
-            hints.AddForbiddenZone(new SDKnockbackInCircleAwayFromOrigin(Arena.Center, knockback.Origin, knockback.Distance, 19f), knockback.Activation);
+            var sd = new SDKnockbackInCircleAwayFromOrigin(Arena.Center, knockback.Origin, knockback.Distance, 19f);
+            hints.AddForbiddenZone(sd, knockback.Activation);
+            // 引导 AI 到安全位置: 被 15y 击退后落点仍在 19y 电网内, 落点越靠中心分越高。
+            var origin = knockback.Origin;
+            var distance = knockback.Distance;
+            hints.GoalZones.Add(position =>
+            {
+                var projected = position + distance * (position - origin).Normalized();
+                var dist = (projected - Arena.Center).Length();
+                return dist < 19f ? 10f - dist * 0.5f : 0f;
+            });
         }
     }
 

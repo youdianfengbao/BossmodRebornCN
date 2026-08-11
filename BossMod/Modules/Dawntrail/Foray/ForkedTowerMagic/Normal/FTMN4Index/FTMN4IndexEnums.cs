@@ -17,12 +17,12 @@ public enum OID : uint
     Actor1e8f2f = 0x1E8F2F, // R0.500, x1, EventObj type
     Actor1e8fb8 = 0x1E8FB8, // R2.000, x1, EventObj type
     Actor1ea1a1 = 0x1EA1A1, // R0.500, x1, EventObj type
-    Actor1ec008 = 0x1EC008, // R0.500, x0 (spawn during fight), EventObj type
-    Actor1ec009 = 0x1EC009, // R0.500, x0 (spawn during fight), EventObj type
-    Actor1ec00a = 0x1EC00A, // R0.500, x0 (spawn during fight), EventObj type
-    Actor1ec00b = 0x1EC00B, // R0.500, x0 (spawn during fight), EventObj type
-    Actor1ec00c = 0x1EC00C, // R0.500, x0 (spawn during fight), EventObj type
-    Actor1ec00d = 0x1EC00D, // R0.500, x0 (spawn during fight), EventObj type
+    FireSector = 0x1EC008, // 2015240, EventObj type
+    IceSector = 0x1EC009, // 2015241, EventObj type
+    ThunderSector = 0x1EC00A, // 2015242, EventObj type
+    FireRing = 0x1EC00B, // 2015243, EventObj type
+    IceRing = 0x1EC00C, // 2015244, EventObj type
+    ThunderRing = 0x1EC00D, // 2015245, EventObj type
     Actor1ec00f = 0x1EC00F, // R0.500, x0 (spawn during fight), EventObj type
 }
 

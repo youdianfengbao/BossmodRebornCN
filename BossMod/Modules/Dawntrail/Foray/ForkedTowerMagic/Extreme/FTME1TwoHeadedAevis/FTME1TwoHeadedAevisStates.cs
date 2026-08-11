@@ -1,9 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Extreme.FTME1TwoHeadedAevis;
 
-namespace BossModReborn.Modules.Dawntrail.Foray.ForkedTowerMagic.Extreme.FTME1TwoHeadedAevis;
-
-internal class FTME1TwoHeadedAevisStates
+[SkipLocalsInit]
+sealed class TwoHeadedAevisStates : StateMachineBuilder
 {
+    public TwoHeadedAevisStates(BossModule module) : base(module)
+    {
+        TrivialPhase()
+            .ActivateOnEnter<TwoHeadedAevisAOEs>()
+            .ActivateOnEnter<IceFlameCross>()
+            .ActivateOnEnter<MahjongMechanics>();
+    }
 }

@@ -1,9 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Extreme.FTME2SwordDancer;
 
-namespace BossModReborn.Modules.Dawntrail.Foray.ForkedTowerMagic.Extreme.FTME2SwordDancer;
-
-internal class FTME2SwordDancerStates
+[SkipLocalsInit]
+sealed class SwordDancerStates : StateMachineBuilder
 {
+    public SwordDancerStates(BossModule module) : base(module)
+    {
+        TrivialPhase()
+            .ActivateOnEnter<SwordDancerAOEs>()
+            .ActivateOnEnter<DancingSwordTelegraph>();
+    }
 }

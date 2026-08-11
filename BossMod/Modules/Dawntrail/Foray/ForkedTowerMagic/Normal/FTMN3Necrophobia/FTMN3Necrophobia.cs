@@ -21,8 +21,8 @@ namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN3Necrophobia;
     SortOrder = 3,
     PlanLevel = 0)]
 [SkipLocalsInit]
-// 场地圆形 R24：2026-08-06 回放实测确认，与现有定义一致。
-public sealed class Necrophobia(WorldState ws, Actor primary) : BossModule(ws, primary, new(100f, 800f), new ArenaBoundsCircle(24f));
+// 场地圆形 R23.7：merge codex 后按用户修正（原 24f 略大）。
+public sealed class Necrophobia(WorldState ws, Actor primary) : BossModule(ws, primary, new(100f, 800f), new ArenaBoundsCircle(23.7f));
 
 // ==================== 组件（形状/时机均来自 2026-08-06 三场回放实测） ====================
 // 角度说明：读条 rotation（spell.Rotation）即 BossMod 使用的实际朝向（ToDirection 方向 (sinθ, cosθ)，

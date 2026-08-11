@@ -220,6 +220,9 @@ public sealed class Plugin : IAsyncDalamudPlugin
             case "TOGGLEANTICHEAT":
                 ToggleAnticheat();
                 break;
+            case "RADAR":
+                ToggleRadar(split);
+                break;
         }
     }
 
@@ -533,5 +536,32 @@ public sealed class Plugin : IAsyncDalamudPlugin
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
+    }
+
+    private static bool ToggleRadar(string[] messageData)
+    {
+        var config = Service.Config.Get<BossModuleConfig>();
+
+        if (messageData.Length == 1)
+            config.Enable = !config.Enable;
+        else
+        {
+            switch (messageData[1].ToUpperInvariant())
+            {
+                case "ON":
+                    config.Enable = true;
+                    break;
+                case "OFF":
+                    config.Enable = false;
+                    break;
+                default:
+                    Service.ChatGui.Print($"[BMR] Unknown radar command: {messageData[1]}");
+                    return false;
+            }
+        }
+
+        config.Modified.Fire();
+        Service.Log($"Radar is now {(config.Enable ? "enabled" : "disabled")}");
+        return true;
     }
 }

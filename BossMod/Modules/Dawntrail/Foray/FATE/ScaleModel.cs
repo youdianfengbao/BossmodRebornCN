@@ -1,4 +1,4 @@
-﻿namespace BossMod.Dawntrail.Foray.FATE.NH109DemiMedusa;
+﻿namespace BossMod.Dawntrail.Foray.FATE.ScaleModel;
 
 public enum OID : uint {
     DemiMedusa = 0x4C6A,
@@ -30,11 +30,11 @@ public enum AID : uint {
 sealed class CursedSight(BossModule module) : Components.SimpleAOEGroups(module, [(uint)AID.CursedSight, (uint)AID.CursedSight1],
     new AOEShapeCone(60.0f, 30.0f.Degrees()));
 sealed class LamianLesion(BossModule module) : Components.SimpleAOEs(module, (uint)AID.LamianLesion, new AOEShapeCone(25.0f, 90.0f.Degrees()));
-sealed class Dark(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Dark, new AOEShapeCircle(6.0f));
+sealed class Dark(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Dark, 6f);
 
 [SkipLocalsInit]
-sealed class DemiMedusaStates : StateMachineBuilder {
-    public DemiMedusaStates(BossModule module) : base(module) {
+sealed class ScaleModelStates : StateMachineBuilder {
+    public ScaleModelStates(BossModule module) : base(module) {
         TrivialPhase()
             .ActivateOnEnter<CursedSight>()
             .ActivateOnEnter<LamianLesion>()
@@ -43,7 +43,7 @@ sealed class DemiMedusaStates : StateMachineBuilder {
 }
 
 [ModuleInfo(BossModuleInfo.Maturity.Contributed,
-    StatesType = typeof(DemiMedusaStates),
+    StatesType = typeof(ScaleModelStates),
     ConfigType = null, // replace null with typeof(DemiMedusaConfig) if applicable
     ObjectIDType = typeof(OID),
     ActionIDType = typeof(AID),

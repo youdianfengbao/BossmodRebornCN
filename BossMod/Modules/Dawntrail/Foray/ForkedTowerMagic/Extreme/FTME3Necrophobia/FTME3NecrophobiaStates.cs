@@ -1,9 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Extreme.FTME3Necrophobia;
 
-namespace BossModReborn.Modules.Dawntrail.Foray.ForkedTowerMagic.Extreme.FTME3Necrophobia;
-
-internal class FTME3NecrophobiaStates
+[SkipLocalsInit]
+sealed class NecrophobiaStates : StateMachineBuilder
 {
+    public NecrophobiaStates(BossModule module) : base(module)
+    {
+        TrivialPhase()
+            .ActivateOnEnter<NecrophobiaAOEs>()
+            .ActivateOnEnter<DarkSurgeTreads>();
+    }
 }

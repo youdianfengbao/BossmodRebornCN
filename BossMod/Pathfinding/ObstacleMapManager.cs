@@ -4,13 +4,13 @@ using System.Threading;
 
 namespace BossMod.Pathfinding;
 
-[ConfigDisplay(Name = "Developer settings", Order = 9)]
+[ConfigDisplay(Name = "开发者设置", Order = 9)]
 public sealed class DeveloperConfig : ConfigNode
 {
-    [PropertyDisplay("Obstacle maps: load from source")]
+    [PropertyDisplay("障碍地图：从源文件加载")]
     public bool MapLoadFromSource;
 
-    [PropertyDisplay("Obstacle maps: source path", tooltip: "Should be <repo root>/BossModReborn/Pathfinding/ObstacleMaps/maplist.json")]
+    [PropertyDisplay("障碍地图：源文件路径", tooltip: "应为 <仓库根目录>/BossModReborn/Pathfinding/ObstacleMaps/maplist.json")]
     public string MapSourcePath = "";
 }
 

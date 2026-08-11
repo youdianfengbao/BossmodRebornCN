@@ -1,4 +1,4 @@
-﻿namespace BossMod.Dawntrail.Foray.FATE.NH101Machetaur;
+﻿namespace BossMod.Dawntrail.Foray.FATE.RagingThrall;
 
 public enum OID : uint {
     Machetaur = 0x4C26,
@@ -30,8 +30,8 @@ public enum AID : uint {
 }
 
 sealed class FocusedTremor(BossModule module) : Components.RaidwideCast(module, (uint)AID.FocusedTremor);
-sealed class BruntOfTheBattlefield(BossModule module) : Components.SimpleAOEs(module, (uint)AID.BruntOfTheBattlefield, new AOEShapeCircle(10.0f));
-sealed class Uplift(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Uplift, new AOEShapeCircle(6.0f));
+sealed class BruntOfTheBattlefield(BossModule module) : Components.SimpleAOEs(module, (uint)AID.BruntOfTheBattlefield, 10f);
+sealed class Uplift(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Uplift, 6f);
 
 // Eight short helper casts record the directions during the long visual cast. The boss then
 // executes those cones in the same order, one every ~2.1s.
@@ -112,7 +112,7 @@ sealed class OctupleSwipe(BossModule module) : Components.GenericAOEs(module)
 
 // TODO make it a sequence one instead if its always a single one
 sealed class FocusedTremorCircle(BossModule module) : Components.GenericAOEs(module) {
-    private List<AOEInstance> aoes = [];
+    private readonly List<AOEInstance> aoes = [];
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell) {
         if (spell.Action.ID == (uint)AID.FocusedTremorInner) {
@@ -139,23 +139,21 @@ sealed class FocusedTremorCircle(BossModule module) : Components.GenericAOEs(mod
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) {
         int show = 0;
-        var currentAOEs = aoes.OrderBy(a => a.Activation).Take(2).ToList();
+        var incomingAOEs = aoes.OrderBy(a => a.Activation).Take(2).ToList();
 
-        foreach (ref var aoe in CollectionsMarshal.AsSpan(currentAOEs)) {
+        foreach (ref var aoe in CollectionsMarshal.AsSpan(incomingAOEs)) {
             aoe.Color = show == 0 ? Colors.Danger : Colors.AOE;
             aoe.Risky = show == 0;
             show++;
         }
 
-        return CollectionsMarshal.AsSpan(currentAOEs);
+        return CollectionsMarshal.AsSpan(incomingAOEs);
     }
 }
 
 [SkipLocalsInit]
-sealed class MachetaurStates : StateMachineBuilder
-{
-    public MachetaurStates(BossModule module) : base(module)
-    {
+sealed class RagingThrallStates : StateMachineBuilder {
+    public RagingThrallStates(BossModule module) : base(module) {
         TrivialPhase()
             .ActivateOnEnter<OctupleSwipe>()
             .ActivateOnEnter<FocusedTremor>()
@@ -166,7 +164,7 @@ sealed class MachetaurStates : StateMachineBuilder
 }
 
 [ModuleInfo(BossModuleInfo.Maturity.Contributed,
-    StatesType = typeof(MachetaurStates),
+    StatesType = typeof(RagingThrallStates),
     ConfigType = null, // replace null with typeof(MachetaurConfig) if applicable
     ObjectIDType = typeof(OID),
     ActionIDType = typeof(AID),

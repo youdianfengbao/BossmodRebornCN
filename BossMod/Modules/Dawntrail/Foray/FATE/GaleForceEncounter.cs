@@ -3,7 +3,7 @@
 public enum OID : uint {
     Stormcaller = 0x4BEC,
     Helper = 0x233C,
-    Stormcaller1 = 0x4BED, // R1.000, x0 (spawn during fight)
+    StormcallerHelper = 0x4BED, // R1.000, x0 (spawn during fight)
     BitingWind = 0x4C25, // R1.000, x0 (spawn during fight)
 }
 
@@ -29,7 +29,6 @@ public enum AID : uint {
     FocusedTremor9 = 47595, // 4BED->location, 15.5s cast, range 20-30 donut
 }
 
-// TODO improve this, maybe just add a circle around like 5.0 to keep players away from them
 sealed class Windage(BossModule module) : Components.SimpleAOEs(module, (uint)AID.Windage, new AOEShapeCircle(7.0f));
 sealed class BitingScratch(BossModule module) : Components.SimpleAOEs(module, (uint)AID.BitingScratch, new AOEShapeCone(40.0f, 45.0f.Degrees()));
 
@@ -92,14 +91,15 @@ sealed class FocusedTremor(BossModule module) : Components.ConcentricAOEs(module
                 (uint)AID.FocusedTremor3 or (uint)AID.FocusedTremor6 or (uint)AID.FocusedTremor9 => 2,
                 _ => -1
             };
+
             AdvanceSequence(order, spell.LocXZ, WorldState.FutureTime(2d));
         }
     }
 }
 
 [SkipLocalsInit]
-sealed class StormcallerStates : StateMachineBuilder {
-    public StormcallerStates(BossModule module) : base(module) {
+sealed class GaleForceEncounterStates : StateMachineBuilder {
+    public GaleForceEncounterStates(BossModule module) : base(module) {
         TrivialPhase()
             .ActivateOnEnter<Windage>()
             .ActivateOnEnter<BitingScratch>()
@@ -109,7 +109,7 @@ sealed class StormcallerStates : StateMachineBuilder {
 }
 
 [ModuleInfo(BossModuleInfo.Maturity.Contributed,
-    StatesType = typeof(StormcallerStates),
+    StatesType = typeof(GaleForceEncounterStates),
     ConfigType = null, // replace null with typeof(StormcallerConfig) if applicable
     ObjectIDType = typeof(OID),
     ActionIDType = typeof(AID),
@@ -126,4 +126,4 @@ sealed class StormcallerStates : StateMachineBuilder {
     SortOrder = 1,
     PlanLevel = 0)]
 [SkipLocalsInit]
-public sealed class Stormcaller(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);
+public sealed class GaleForceEncounter(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);

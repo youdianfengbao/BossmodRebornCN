@@ -1,4 +1,4 @@
-﻿namespace BossMod.Dawntrail.Foray.FATE.NH106Iambe;
+﻿namespace BossMod.Dawntrail.Foray.FATE.InconstantGardener;
 
 public enum OID : uint {
     Iambe = 0x4C41,
@@ -21,9 +21,8 @@ public enum SID : uint {
     ForwardMarch = 5142, // Iambe->player, extra=0x0
     AboutFace = 5143, // Iambe->player, extra=0x0
     ForcedMarch = 1257, // Iambe->player, extra=0x1/0x2
-
-    _Gen_1 = 5106, // 4C42->4C43, extra=0x1
-    _Gen_ = 5107, // 4C42->4C43, extra=0x1
+    Gen = 5106, // 4C42->4C43, extra=0x1
+    Gen1 = 5107, // 4C42->4C43, extra=0x1
 }
 
 sealed class GardenersHymn(BossModule module) : Components.SimpleAOEs(module, (uint)AID.GardenersHymn, new AOEShapeCircle(5.0f));
@@ -151,8 +150,8 @@ sealed class Burst(BossModule module) : Components.GenericAOEs(module) {
 }
 
 [SkipLocalsInit]
-sealed class IambeStates : StateMachineBuilder {
-    public IambeStates(BossModule module) : base(module) {
+sealed class InconstantGardenerStates : StateMachineBuilder {
+    public InconstantGardenerStates(BossModule module) : base(module) {
         TrivialPhase()
             .ActivateOnEnter<GardenersHymn>()
             .ActivateOnEnter<OdeOfTheUnderfoot>()
@@ -162,7 +161,7 @@ sealed class IambeStates : StateMachineBuilder {
 }
 
 [ModuleInfo(BossModuleInfo.Maturity.Contributed,
-    StatesType = typeof(IambeStates),
+    StatesType = typeof(InconstantGardenerStates),
     ConfigType = null, // replace null with typeof(IambeConfig) if applicable
     ObjectIDType = typeof(OID),
     ActionIDType = typeof(AID),
@@ -179,4 +178,4 @@ sealed class IambeStates : StateMachineBuilder {
     SortOrder = 1,
     PlanLevel = 0)]
 [SkipLocalsInit]
-public sealed class Iambe(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);
+public sealed class InconstantGardener(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);

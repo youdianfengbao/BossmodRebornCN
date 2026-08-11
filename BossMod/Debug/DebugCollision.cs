@@ -94,7 +94,8 @@ public static unsafe class CollisionOutlinesExtractor
     public static List<PolygonWithHoles> ExtractPolygonsUnionMany(
         IReadOnlyList<nint> meshPtrs, ulong wantedMaterialId, ulong wantedMask,
         float snapEpsXZ = 1e-4f, Vector2 centerXZ = default, float radius = 0f, bool strictRadius = true,
-        MaterialMatchMode matchMode = MaterialMatchMode.PrimExact, long scale = 1024 * 1024, float minAreaMeters2 = 1e-6f)
+        MaterialMatchMode matchMode = MaterialMatchMode.PrimExact, long scale = 1024 * 1024, float minAreaMeters2 = 1e-6f,
+        float floorY = float.NaN, float floorYRange = 0f, float minNormalY = 0f)
     {
         var res = new List<PolygonWithHoles>();
         var countM = meshPtrs.Count;
@@ -116,7 +117,8 @@ public static unsafe class CollisionOutlinesExtractor
                 continue;
             }
 
-            CollectSubjectTriangles(cm, wantedMaterialId, wantedMask, centerXZ, radius, strictRadius, matchMode, scale, snapInt, subjects, yLUT, edges);
+            CollectSubjectTriangles(cm, wantedMaterialId, wantedMask, centerXZ, radius, strictRadius, matchMode, scale, snapInt, subjects, yLUT, edges,
+                floorY, floorYRange, minNormalY);
         }
 
         if (subjects.Count == 0)
@@ -129,18 +131,21 @@ public static unsafe class CollisionOutlinesExtractor
     }
 
     private static void CollectSubjectTriangles(ColliderMesh* coll, ulong wantedId, ulong wantedMask, Vector2 centerXZ, float radius, bool strictRadius, MaterialMatchMode matchMode,
-       long scale, long snapInt, Paths64 subjects, Dictionary<Point64, float> yLUT, List<EdgeY> edges)
+       long scale, long snapInt, Paths64 subjects, Dictionary<Point64, float> yLUT, List<EdgeY> edges,
+       float floorY = float.NaN, float floorYRange = 0f, float minNormalY = 0f)
     {
         var mesh = (MeshPCB*)coll->Mesh;
         var world = coll->World;
         var objMask = coll->Collider.ObjectMaterialMask;
         var objId = coll->Collider.ObjectMaterialValue & objMask;
 
-        CollectNode(mesh->RootNode, ref world, objId, objMask, wantedId, wantedMask, centerXZ, radius, strictRadius, matchMode, scale, snapInt, subjects, yLUT, edges);
+        CollectNode(mesh->RootNode, ref world, objId, objMask, wantedId, wantedMask, centerXZ, radius, strictRadius, matchMode, scale, snapInt, subjects, yLUT, edges,
+            floorY, floorYRange, minNormalY);
     }
 
     private static void CollectNode(MeshPCB.FileNode* node, ref Matrix4x3 world, ulong objMatId, ulong objMatMask, ulong wantedId, ulong wantedMask,
-        Vector2 centerXZ, float radius, bool strictRadius, MaterialMatchMode matchMode, long scale, long snapInt, Paths64 subjects, Dictionary<Point64, float> yLUT, List<EdgeY> edges)
+        Vector2 centerXZ, float radius, bool strictRadius, MaterialMatchMode matchMode, long scale, long snapInt, Paths64 subjects, Dictionary<Point64, float> yLUT, List<EdgeY> edges,
+        float floorY, float floorYRange, float minNormalY)
     {
         if (node == null)
         {
@@ -169,6 +174,20 @@ public static unsafe class CollisionOutlinesExtractor
                 var a = world.TransformCoordinate(node->Vertex(prim.V1));
                 var b = world.TransformCoordinate(node->Vertex(prim.V2));
                 var c = world.TransformCoordinate(node->Vertex(prim.V3));
+
+                if (floorYRange > 0f && (MathF.Abs(a.Y - floorY) > floorYRange || MathF.Abs(b.Y - floorY) > floorYRange || MathF.Abs(c.Y - floorY) > floorYRange))
+                {
+                    continue;
+                }
+                if (minNormalY > 0f)
+                {
+                    var normal = Vector3.Cross(b - a, c - a);
+                    var normalLength = normal.Length();
+                    if (normalLength <= 1e-6f || MathF.Abs(normal.Y) / normalLength < minNormalY)
+                    {
+                        continue;
+                    }
+                }
 
                 if (radius > 0f)
                 {
@@ -216,8 +235,10 @@ public static unsafe class CollisionOutlinesExtractor
             }
         }
 
-        CollectNode(node->Child1, ref world, objMatId, objMatMask, wantedId, wantedMask, centerXZ, radius, strictRadius, matchMode, scale, snapInt, subjects, yLUT, edges);
-        CollectNode(node->Child2, ref world, objMatId, objMatMask, wantedId, wantedMask, centerXZ, radius, strictRadius, matchMode, scale, snapInt, subjects, yLUT, edges);
+        CollectNode(node->Child1, ref world, objMatId, objMatMask, wantedId, wantedMask, centerXZ, radius, strictRadius, matchMode, scale, snapInt, subjects, yLUT, edges,
+            floorY, floorYRange, minNormalY);
+        CollectNode(node->Child2, ref world, objMatId, objMatMask, wantedId, wantedMask, centerXZ, radius, strictRadius, matchMode, scale, snapInt, subjects, yLUT, edges,
+            floorY, floorYRange, minNormalY);
     }
 
     private static List<PolygonWithHoles> Paths64ToPolys(Paths64 paths, Dictionary<Point64, float> yLUT, List<EdgeY> edges, long scale, long snapInt, float minAreaMeters2)
@@ -737,6 +758,8 @@ public sealed unsafe class DebugCollision() : IDisposable
     private bool _exportStrictRadius = true;
     private float _exportSnapEpsXZ = 1e-5f;
     private float _exportMinArea = 1e-6f;
+    private float _exportFloorYRange = 1.5f;
+    private float _exportFloorMinNormalY = 0.8f;
 
     private string _exportMeshIdListHex = "";
     private bool _selectionMode = false;
@@ -968,6 +991,9 @@ public sealed unsafe class DebugCollision() : IDisposable
             // drop tiny fragments after union
             ImGui.SliderFloat("Min area (yalm^2)", ref _exportMinArea, 0f, 0.01f, "%.6f");
 
+            ImGui.SliderFloat("Floor Y half range (yalm)", ref _exportFloorYRange, 0.1f, 5f, "%.1f");
+            ImGui.SliderFloat("Floor min |normal.Y|", ref _exportFloorMinNormalY, 0.5f, 1f, "%.2f");
+
             ImGui.Separator();
             ImGui.Checkbox("Selection mode (multi-pick)", ref _selectionMode);
             ImGui.SameLine();
@@ -1012,6 +1038,17 @@ public sealed unsafe class DebugCollision() : IDisposable
             if (ImGui.Button("Copy polygons (Vector3, mesh-id list)"))
             {
                 ExportPolysByMeshIdList(meshIds, CollisionOutlinesExtractor.ClipboardVectorFormat.Vector3XYZ);
+            }
+
+            if (ImGui.Button("Copy floor polygons (WPos, mesh-id list)"))
+            {
+                ExportPolysByMeshIdList(meshIds, CollisionOutlinesExtractor.ClipboardVectorFormat.Vector2XZ, floorOnly: true);
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Copy floor polygons (Vector3, mesh-id list)"))
+            {
+                ExportPolysByMeshIdList(meshIds, CollisionOutlinesExtractor.ClipboardVectorFormat.Vector3XYZ, floorOnly: true);
             }
 
             ImGui.EndDisabled();
@@ -1782,7 +1819,7 @@ public sealed unsafe class DebugCollision() : IDisposable
             >= 'A' and <= 'F';
     }
 
-    private void ExportPolysByMeshIdList(HashSet<ulong> ids, CollisionOutlinesExtractor.ClipboardVectorFormat fmt)
+    private void ExportPolysByMeshIdList(HashSet<ulong> ids, CollisionOutlinesExtractor.ClipboardVectorFormat fmt, bool floorOnly = false)
     {
         var module = Framework.Instance()->BGCollisionModule;
         List<nint> meshPtrs = [];
@@ -1831,10 +1868,10 @@ public sealed unsafe class DebugCollision() : IDisposable
             }
         }
 
-        ExportPolys(meshPtrs, fmt);
+        ExportPolys(meshPtrs, fmt, floorOnly);
     }
 
-    private void ExportPolys(List<nint> meshPtrs, CollisionOutlinesExtractor.ClipboardVectorFormat fmt)
+    private void ExportPolys(List<nint> meshPtrs, CollisionOutlinesExtractor.ClipboardVectorFormat fmt, bool floorOnly = false)
     {
         var wantedId = _materialId.Raw;
         var wantedMask = _materialMask.Raw;
@@ -1850,7 +1887,10 @@ public sealed unsafe class DebugCollision() : IDisposable
             useRadius ? _exportRadiusXZ : 0f,
             _exportStrictRadius,
             _exportMatchMode,
-            minAreaMeters2: _exportMinArea);
+            minAreaMeters2: _exportMinArea,
+            floorY: floorOnly ? p.Y : float.NaN,
+            floorYRange: floorOnly ? _exportFloorYRange : 0f,
+            minNormalY: floorOnly ? _exportFloorMinNormalY : 0f);
 
         var text = CollisionOutlinesExtractor.FormatForClipboard(polys, fmt, 5);
         ImGui.SetClipboardText(text);

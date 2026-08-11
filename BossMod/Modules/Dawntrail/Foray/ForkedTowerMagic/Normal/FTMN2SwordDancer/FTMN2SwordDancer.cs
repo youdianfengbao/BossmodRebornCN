@@ -28,7 +28,7 @@ namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN2SwordDancer;
 // boss 提前死亡等场景，避免雷达被 boss2 持续占用挡掉后续 boss3/4。
 public sealed class SwordDancer : BossModule
 {
-    public SwordDancer(WorldState ws, Actor primary) : base(ws, primary, new(600f, 704f), new ArenaBoundsCircle(24f))
+    public SwordDancer(WorldState ws, Actor primary) : base(ws, primary, new(600f, 704f), new ArenaBoundsCircle(23.7f))
     {
         // 舞动之剑全部列为敌人（2026-08-07 用户要求：方便查询对应情况）——
         // 预填充 RelevantEnemies：4D77 投剑突进/回旋、4D79 回转、4D7A 跃进步法四剑、4D7C 八剑突进

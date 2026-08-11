@@ -36,9 +36,9 @@ sealed class ElementFloor(BossModule module) : BossComponent(module)
     {
         var oid = prop switch
         {
-            0 => (uint)OID.Actor1ec008, // 火地板
-            1 => (uint)OID.Actor1ec00a, // 雷地板
-            2 => (uint)OID.Actor1ec009, // 冰地板
+            0 => (uint)OID.FireSector, // 火地板（merge 后上游命名）
+            1 => (uint)OID.ThunderSector, // 雷地板
+            2 => (uint)OID.IceSector, // 冰地板
             _ => default
         };
         foreach (var f in Module.Enemies(oid))
@@ -185,9 +185,9 @@ sealed class ElementRings(BossModule module) : Components.GenericAOEs(module)
     {
         var prop = actor.OID switch
         {
-            (uint)OID.Actor1ec00b => 0, // 火环
-            (uint)OID.Actor1ec00d => 1, // 雷环
-            (uint)OID.Actor1ec00c => 2, // 冰环
+            (uint)OID.FireRing => 0, // 火环（merge 后上游命名）
+            (uint)OID.ThunderRing => 1, // 雷环
+            (uint)OID.IceRing => 2, // 冰环
             _ => -1
         };
         if (prop < 0 || !_known.Add(actor.InstanceID))

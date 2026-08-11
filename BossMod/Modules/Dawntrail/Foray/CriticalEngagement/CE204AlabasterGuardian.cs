@@ -74,6 +74,9 @@ sealed class AlabasterSlashes(BossModule module) : ReplayValidatedOppositeAOEs(m
 
 sealed class AlabasterRaidwides(BossModule module) : Components.RaidwideCasts(module, [(uint)AID.FabricatedHoly, (uint)AID.StoneSwordShockwave]);
 
+// 四个命令小怪 (Alabaster Colossus) 需要击杀, 否则全员吃 Homage 大伤害。人少时 AI 不打会炸。
+sealed class AlabasterAdds(BossModule module) : Components.AddsMulti(module, [(uint)OID.AlabasterColossus], 1);
+
 sealed class AlabasterGuardianStates : StateMachineBuilder
 {
     public AlabasterGuardianStates(BossModule module) : base(module)
@@ -81,7 +84,8 @@ sealed class AlabasterGuardianStates : StateMachineBuilder
         TrivialPhase()
             .ActivateOnEnter<AlabasterAOEs>()
             .ActivateOnEnter<AlabasterSlashes>()
-            .ActivateOnEnter<AlabasterRaidwides>();
+            .ActivateOnEnter<AlabasterRaidwides>()
+            .ActivateOnEnter<AlabasterAdds>();
     }
 }
 

@@ -20,7 +20,7 @@ public enum OID : uint
 public enum AID : uint
 {
     Ability_ = 47614, // TwoHeadedAevis->self, 7.2+0.8s cast, single-target
-    Ability_1 = 48243, // Helper->location, 8.0s cast, range 30 circle
+    Ability_StormsBreathAOE = 48243, // Helper->location, 8.0s cast, range 30 circle
     Ability_StormsBreath = 47616, // Helper->location, 8.0s cast, ???
     Ability_StormsBreath1 = 47613, // GreenHead1->self, 8.0s cast, single-target
     Weaponskill_Aethersplit = 48642, // GreenHead2->BlueHead2, no cast, single-target
