@@ -142,11 +142,11 @@ sealed class StormsBreathKnockback(BossModule module) : Components.GenericKnockb
     }
 }
 
-// 定时诅咒（5403 东风 / 5404 西风）：中诅咒后 13s 沿固定方向击退 15y。
+// 定时诅咒（5403 东风 / 5404 西风）：中诅咒后 13s 沿固定方向击退 20y。
 // StatusAdd 立即画击退箭头，并在落点画绿色圆环安全区，方便提前站位。
 sealed class TimedCurseKnockback(BossModule module) : Components.GenericKnockback(module)
 {
-    private const float Distance = 15f;
+    private const float Distance = 20f;
     private const double FallbackDelay = 13d;
     private const double LandingAOEWindow = 3d;
     private readonly List<Knockback> _knockbacks = [with(8)];

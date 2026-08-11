@@ -323,7 +323,12 @@ sealed class ElectricBoundary(BossModule module) : Components.GenericAOEs(module
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
-        => hints.AddForbiddenZone(AIShape, Arena.Center);
+    {
+        hints.AddForbiddenZone(AIShape, Arena.Center);
+        // Permanent forbidden zones constrain the selected destination, but the pathfinder can
+        // still route through them while avoiding another AOE. Make the lethal fence a hard wall.
+        hints.TemporaryObstacles.Add(new SDInvertedCircle(Arena.Center, 18.5f));
+    }
 
     public override void DrawArenaBackground(int pcSlot, Actor pc)
     {
@@ -361,7 +366,6 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
     private DateTime _activation;
     private int _resolvedCells;
     private bool _armed;
-    private bool _directionsFresh;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
@@ -377,27 +381,19 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
         // require the replay-specific boss+37..40 helper IDs before exposing the sectors: those
         // IDs can shift when the client creates extra helpers, which previously left AI with only
         // the center circle and caused it to hug the boss until the hit packet.
-        var inner1 = Helper(37);
-        var inner2 = Helper(38);
-        var outer1 = Helper(39);
-        var outer2 = Helper(40);
-        if (_innerDirection is { } inner && _outerDirection is { } outer)
+        if (TryResolveInnerDirection(out var inner))
         {
+            var inner1 = Helper(37);
+            var inner2 = Helper(38);
             Add(InnerCell, inner, true, inner1?.InstanceID ?? 0);
             Add(InnerCell, inner + 180f.Degrees(), true, inner2?.InstanceID ?? 0);
+        }
+        if (TryResolveOuterDirection(out var outer))
+        {
+            var outer1 = Helper(39);
+            var outer2 = Helper(40);
             Add(OuterCell, outer, true, outer1?.InstanceID ?? 0);
             Add(OuterCell, outer + 180f.Degrees(), true, outer2?.InstanceID ?? 0);
-        }
-        else if (inner1 != null && inner2 != null && outer1 != null && outer2 != null)
-        {
-            UpdateDirectionFreshness(inner1, inner2, outer1, outer2);
-            if (_directionsFresh)
-            {
-                Add(InnerCell, inner1.Rotation, true, inner1.InstanceID);
-                Add(InnerCell, inner2.Rotation, true, inner2.InstanceID);
-                Add(OuterCell, outer1.Rotation, true, outer1.InstanceID);
-                Add(OuterCell, outer2.Rotation, true, outer2.InstanceID);
-            }
         }
         return CollectionsMarshal.AsSpan(_displayed);
     }
@@ -406,7 +402,7 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
     {
         base.AddAIHints(slot, actor, assignment, hints);
 
-        if (!_armed || _innerDirection is not { } inner || _outerDirection is not { })
+        if (!_armed || !TryResolveInnerDirection(out var inner))
             return;
 
         // Give the pathfinder a concrete destination band in the safe part of the inner ring.
@@ -494,7 +490,6 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
         foreach (var offset in new ulong[] { 37, 38, 39, 40 })
             if (Helper(offset) is { } helper)
                 _orientationBaseline[helper.InstanceID] = helper.Rotation;
-        _directionsFresh = false;
     }
 
     private void Clear()
@@ -505,17 +500,44 @@ sealed class DeathRouletteGrid(BossModule module) : Components.GenericAOEs(modul
         _orientationBaseline.Clear();
         _innerDirection = null;
         _outerDirection = null;
-        _directionsFresh = false;
     }
 
-    private void UpdateDirectionFreshness(params Actor[] helpers)
+    private bool TryResolveInnerDirection(out Angle direction)
     {
-        if (_directionsFresh || _orientationBaseline.Count != 4)
-            return;
-
-        _directionsFresh = helpers.All(helper => _orientationBaseline.TryGetValue(helper.InstanceID, out var baseline)
-            && Math.Abs((helper.Rotation - baseline).Normalized().Rad) > 1f.Degrees().Rad);
+        if (_innerDirection is { } guideDirection)
+        {
+            direction = guideDirection;
+            return true;
+        }
+        return TryResolveHelperDirection(37, 38, out direction);
     }
+
+    private bool TryResolveOuterDirection(out Angle direction)
+    {
+        if (_outerDirection is { } guideDirection)
+        {
+            direction = guideDirection;
+            return true;
+        }
+        return TryResolveHelperDirection(39, 40, out direction);
+    }
+
+    private bool TryResolveHelperDirection(ulong firstOffset, ulong secondOffset, out Angle direction)
+    {
+        var first = Helper(firstOffset);
+        var second = Helper(secondOffset);
+        if (first != null && second != null && DirectionIsFresh(first) && DirectionIsFresh(second))
+        {
+            direction = first.Rotation;
+            return true;
+        }
+
+        direction = default;
+        return false;
+    }
+
+    private bool DirectionIsFresh(Actor helper) => !_orientationBaseline.TryGetValue(helper.InstanceID, out var baseline)
+        || Math.Abs((helper.Rotation - baseline).Normalized().Rad) > 1f.Degrees().Rad;
 
     private void Prune()
     {
