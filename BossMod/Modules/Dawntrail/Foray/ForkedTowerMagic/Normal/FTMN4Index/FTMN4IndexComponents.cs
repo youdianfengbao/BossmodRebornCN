@@ -64,6 +64,10 @@ sealed class ElementFloor(BossModule module) : BossComponent(module)
 //   改为 48400 读条开始也重置（每次创造独立 _spawnTime/_wave 基准）。
 // - OnUntethered 改按 source.OID 定属性：断开事件后 tether 已清空（ID=0，BossModule 传断开后状态），
 //   原按 tether.ID 匹配 363/364/365 永远失败 → 校准（断开+0.63s）从不生效；改按球实体 OID（4B64→冰/4B65→火/4B66→雷）。
+// 08-13 修复（08-13 回放雷球预警提前消失）：球旋转时长不定（08-13 04:30 轮雷球生成 ±20.5y、旋转 9.4s 才到平台），
+// 预判（生成+7.3s）在 OnUntethered 校准（断开+0.63s）前已被 activation+0.5s 清理点删除 → 校准落空 → 预警提前消失；
+// 改为 OnEventCast（48396/48397/48398 实际施放）按属性+activation 校验移除预判项（预警保留到 cone 打出，
+// activation 校验防环机制同 AID cone 误删），ActiveAOEs 清理宽限 0.5s→3s 兜底（预判项存活到校准）。
 // 紧迫度：最先生效的波次 Colors.Danger，其余 Colors.AOE（参考 ArcaneBeacon 紧迫度分级）。
 sealed class ElementOrbs(BossModule module) : Components.GenericAOEs(module)
 {
@@ -151,11 +155,36 @@ sealed class ElementOrbs(BossModule module) : Components.GenericAOEs(module)
         }
     }
 
+    // 实际 cone 施放（48396 炽炎火 / 48397 冰澈冰 / 48398 霹雷雷）→ 移除对应属性预判项（2026-08-13 修复：
+    // 原 activation+0.5s 硬清理在球旋转慢时提前删预警——08-13 04:30 轮雷球生成于 ±20.5y 处、旋转 9.4s 才到平台，
+    // Tether 断开（31.48）晚于预判（29.37）+0.5s 清理点（29.87）→ 校准前项已删 → 校准落空 → 预警提前消失；
+    // 改为按实际施放事件移除，预警保留到 cone 打出；activation 校验防环机制同 AID cone 误删球预判项）
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        var prop = spell.Action.ID switch
+        {
+            (uint)AID.FireIV => 0, // 48396 炽炎（火）
+            (uint)AID.BlizzardIV => 2, // 48397 冰澈（冰）
+            (uint)AID.ThunderIV => 1, // 48398 霹雷（雷）
+            _ => -1
+        };
+        if (prop < 0)
+        {
+            return;
+        }
+
+        var now = WorldState.CurrentTime;
+        _aoes.RemoveAll(a => a.ActorID == _ballActor[prop] && a.Activation <= now.AddSeconds(1d)); // 仅移除即将施放的项（校准后 activation=断开+0.63 ≈ 施放时刻）
+        _added[prop] = false; // 允许下一轮再添加（_known 已去重，不会重复）
+    }
+
     // 紧迫度：最先生效的波次深黄（Danger+risky），其余浅黄（AOE、risky=false）——参考 ArcaneBeacon
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         var time = WorldState.CurrentTime;
-        _aoes.RemoveAll(a => a.Activation.AddSeconds(0.5d) < time); // 爆炸后清除（2026-08-12 修复：球 cone 结算后残留不消失，与 ElementRings 同款）
+        // 结算后清除宽限 3s（2026-08-13 修复：0.5s 宽限在球旋转慢时提前删预判项——预判项需存活到
+        // OnUntethered 校准（断开+0.63s）与 OnEventCast 移除；3s 覆盖校准偏差，正常由 OnEventCast 精确移除）
+        _aoes.RemoveAll(a => a.Activation.AddSeconds(3d) < time);
 
         var soon = DateTime.MaxValue;
         var len = _aoes.Count;
@@ -246,13 +275,15 @@ sealed class ElementRings(BossModule module) : Components.GenericAOEs(module)
     }
 }
 
-// 击退会死区（2026-08-12 用户最终语义：OR 关系）——距击退来源 **>10f**（GuideRadius，可能同时吃两个击退、
-// AI 无法确认存活）**或** 9y 径向击退（AwayFromOrigin）后落点在战斗场地外（异形场地 + 内圈即死区挖洞，
-// InBounds 判定）的像素禁入，满足其一即禁入；唯一安全区 = 距分身 ≤10f 且击退后落点在场内。
+// 击退会死区（2026-08-12 用户修复：三分身独立禁入区互相覆盖安全区 → 改为多来源联合判定）：
+// 单来源危险 = 距该分身 **>10f**（GuideRadius，可能同时吃两个击退、AI 无法确认存活）**或** 9y 径向击退
+// （AwayFromOrigin）后落点在战斗场地外（异形场地 + 内圈即死区挖洞，InBounds 判定）；
+// 联合语义：p 安全 ⟺ 存在任一分身 i：距 i ≤10f 且被 i 击退后落点在场内（安全区 = 三个 10f 圆盘扣除各自
+// 击退出界部分的并集）；p 禁入 ⟺ 对所有分身均危险。恰在分身位置（距离 ~0，击退方向无定义）保守安全。
 // 假距离实现（先例 SDKnockbackInCircleAwayFromOrigin：Contains=0f 禁入/1f 允许，ShapeDistance.cs 注释许可非真距离）。
-sealed class KnockbackDeathZone(WPos origin, float radius, float distance, Func<WPos, bool> inBounds) : ShapeDistance
+sealed class KnockbackDeathZone(WPos[] origins, float radius, float distance, Func<WPos, bool> inBounds) : ShapeDistance
 {
-    private readonly WPos _origin = origin;
+    private readonly WPos[] _origins = origins;
     private readonly float _radius = radius;
     private readonly float _distance = distance;
     private readonly Func<WPos, bool> _inBounds = inBounds;
@@ -260,13 +291,26 @@ sealed class KnockbackDeathZone(WPos origin, float radius, float distance, Func<
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override bool Contains(in WPos p)
     {
-        var to = p - _origin;
-        if (to.LengthSq() > _radius * _radius)
+        var count = _origins.Length;
+        for (var i = 0; i < count; ++i)
         {
-            return true; // 距分身 >10f：可能同时吃两个击退，AI 无法确认存活 → 禁入
+            var to = p - _origins[i];
+            var lenSq = to.LengthSq();
+            if (lenSq <= _radius * _radius)
+            {
+                if (lenSq <= 1e-4f)
+                {
+                    return false; // 恰在分身位置：击退方向无定义，保守安全
+                }
+                var projected = p + _distance * to.Normalized();
+                if (_inBounds(projected))
+                {
+                    return false; // 该分身视角安全 → p 安全（任一分身安全即安全）
+                }
+            }
+            // 该分身视角危险（距其 >10f 或击退后出界）：继续检查其余分身
         }
-        var projected = p + _distance * to.Normalized();
-        return !_inBounds(projected); // ≤10f 内但被 9y 击退后落点出场地 → 禁入
+        return true; // 所有分身视角均危险 → 禁入
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -276,14 +320,17 @@ sealed class KnockbackDeathZone(WPos origin, float radius, float distance, Func<
 // 击退引导（FlyingDecreeGuide，2026-08-12 用户方案 v3：GoalZones 绿色引导改为 ForbiddenZone 禁入）：
 // boss 读条飞翔指令（48403）→ 三分身（4B6F）落固定三角位（北 (0,-612.5)/南西 (-13.423,-635.75)/南东 (13.423,-635.75)，R15.5）
 // → 分身 R15 圆击退 9y（AwayFromOrigin，用户实测）。
-// 禁入区（ForbiddenZone，仅 AI 视觉）：距分身 >10f（可能同时吃两个击退）**或** 9y 径向击退后落点在战斗场地外
-// （异形场地 + 内圈即死区挖洞，Arena.InBounds 判定）→ 禁入（OR 关系）；唯一安全 = ≤10f 且落点在场内。
+// 禁入区（ForbiddenZone，仅 AI 视觉；2026-08-12 用户修复：三分身独立禁入区互相覆盖安全圆盘 → 联合判定）：
+// 单分身视角危险 = 距其 >10f（可能同时吃两个击退）或 9y 径向击退后落点在战斗场地外（异形场地 + 内圈即死区挖洞）；
+// 联合语义：安全 = 任一分身视角安全（≤10f 且击退后落点在场内），对所有分身均危险才禁入。
 // AI 避开会死区 = 等效站击退安全区。
 // 弃用 GoalZones 绿色引导（2026-08-12 用户确认）：绿色引导受 NavigationDecision 施法门控（CastInfo==null 才栅格化
 // GoalZones）影响，AI 玩家持续施法时完全消失（08-12 回放 10:03:53 起连续闪灼实测）；ForbiddenZone 栅格化在门控之前
 // 无条件执行（NavigationDecision.Build），AI 面板始终显示。
 // 窗口（与 FlyingDecreeKnockbacks 雷达箭头同窗口）：48403 飞翔指令读条开始激活 → 48405/48406 冲击波读条结束停用，
-// 兜底 100s（48403 开始起算，防事件缺失）。
+// 兜底 15s（48403 开始起算，防事件缺失；2026-08-12 用户确认 100s 过长）；
+// OnCastFinished 加 EventHappened 防护（2026-08-12 修复：回放加速/重同步时 48405/48406 结束事件可能提前补发
+// 致引导提前停用，与 HolyLanceShockwaves 同款防护）。
 sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
 {
     private const float KnockbackDistance = 9f; // 击退距离（用户实测）
@@ -299,17 +346,26 @@ sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
     private bool _active;
     private DateTime _expire;
 
+    // 跨相位常驻（2026-08-12 修复：封印武器读条（48384/48386）触发 p2→p3 相位切换，Exit 时未标记
+    // KeepOnPhaseChange 的组件被 ClearComponents 销毁重建 → _active 窗口状态丢失 → 禁区消失；
+    // 改为构造激活 + KeepOnPhaseChange（与 FTMN2 ThrownSwords 同模式，States 不再挂载）
+    public override bool KeepOnPhaseChange => true;
+
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
         if (spell.Action.ID == (uint)AID.PropulsiveProphecy) // 飞翔指令读条开始：激活引导（圣枪 4B62 常驻非触发点，以 48403 为准）
         {
             _active = true;
-            _expire = WorldState.FutureTime(100d); // 兜底窗口（正常由冲击波读条结束停用）
+            _expire = WorldState.FutureTime(15d); // 兜底窗口 15s（2026-08-12 用户确认；正常由冲击波读条结束停用，兜底仅防事件缺失）
         }
     }
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
+        if (spell.EventHappened)
+        {
+            return; // 回放加速/重同步的重复事件：不误停用（2026-08-12 修复，与 HolyLanceShockwaves 同款防护）
+        }
         if (spell.Action.ID is (uint)AID.Shockwave1 or (uint)AID.Shockwave) // 冲击波 48405/48406 读条结束：飞翔阶段结束 → 停用引导
         {
             _active = false;
@@ -331,11 +387,12 @@ sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
             return;
         }
 
-        // 击退会死区禁入（三分身各一，activation=default 立即生效）：距分身 >10f 或 9y 径向击退后落点在场外 → 禁入（安全 = ≤10f 且落点在场内）
-        foreach (var phantom in PhantomPositions)
-        {
-            hints.AddForbiddenZone(new KnockbackDeathZone(phantom, GuideRadius, KnockbackDistance, Module.Arena.InBounds));
-        }
+        // 击退会死区禁入（单次联合判定；2026-08-12 用户修复：三分身独立禁入区会互相覆盖安全圆盘 → 改为联合 shape）：
+        // 安全 = 任一分身视角安全（距该分身 ≤10f 且击退后落点在场内）；对所有分身均危险（>10f 或击退出界）才禁入。
+        // 紧迫度 g 恒=10（2026-08-12 用户方案：activation = now+11s → g = 11−1s 缓冲 = 10 恒定中等紧迫——
+        // 原 activation=default 恒 g=0 最高紧迫，AI 死守击退安全碎片区；封印武器读条 g 从 ~4.7 衰减至 <10 后
+        // 紧迫度反超，把 AI 从被覆盖区域驱离到正确安全区）
+        hints.AddForbiddenZone(new KnockbackDeathZone(PhantomPositions, GuideRadius, KnockbackDistance, Module.Arena.InBounds), WorldState.FutureTime(11d));
     }
 }
 
@@ -360,12 +417,17 @@ sealed class FlyingDecreeKnockbacks(BossModule module) : Components.GenericKnock
     private bool _active;
     private DateTime _expire;
 
+    // 跨相位常驻（2026-08-12 修复：与 FlyingDecreeGuide 同根因——封印武器读条触发 p2→p3 相位切换，
+    // 非 KeepOnPhaseChange 组件被销毁重建 → _active 丢失 → 封印武器期间雷达箭头消失；构造激活 + KeepOnPhaseChange，
+    // 与 FTMN2 ThrownSwords 同模式，States 不再挂载）
+    public override bool KeepOnPhaseChange => true;
+
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
         if (spell.Action.ID == (uint)AID.PropulsiveProphecy) // 飞翔指令读条开始：激活（圣枪 4B62 常驻非触发点，以 48403 为准）
         {
             _active = true;
-            _expire = WorldState.FutureTime(60d); // 兜底窗口（正常由冲击波读条结束停用）
+            _expire = WorldState.FutureTime(15d); // 兜底窗口 15s（2026-08-12 用户确认：飞翔指令这轮击退相关统一 15s，与 FlyingDecreeGuide 一致；正常由冲击波读条结束停用）
         }
     }
 
@@ -570,60 +632,12 @@ sealed class SlashCombos(BossModule module) : ReplayValidatedCastAOEs(module)
         => actionID is (uint)AID.WindSlash or (uint)AID.Iainuki ? new(Cone) : null;
 }
 
-// 全知烈火分散：本体 48418 读条 4.7s，结束后 Helper 48420 全知劫火对全体玩家按当前站位 R6 分散判定
-// （no cast 事件，分 3 批约 +0.2/+3.2/+6.2s，回放实测 10 目标=全部玩家）。
-// 绘制其他玩家位置的 R6 圈；AI 禁区排除自己（与队友保持距离）
-sealed class AllKnowingFlamesSpread(BossModule module) : Components.GenericAOEs(module)
-{
-    private static readonly AOEShapeCircle Shape = new(6f);
-    private DateTime _resolve = default; // 判定开始（48418 读条结束 +0.2s）
-    private DateTime _clear = default; // 全部批次结束后清空
-    private readonly List<AOEInstance> _displayed = [with(12)];
-
-    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
-    {
-        if (spell.Action.ID == (uint)AID.AllKnowingFlames)
-        {
-            _resolve = Module.CastFinishAt(spell).AddSeconds(0.2f);
-            _clear = _resolve.AddSeconds(7.5f); // 3 批约 6.5s 内判定完毕
-        }
-    }
-
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
-    {
-        if (WorldState.CurrentTime > _clear)
-        {
-            _resolve = default;
-        }
-
-        _displayed.Clear();
-        if (_resolve == default)
-        {
-            return CollectionsMarshal.AsSpan(_displayed);
-        }
-
-        foreach (var p in Raid.WithoutSlot())
-        {
-            _displayed.Add(new(Shape, p.Position, default, _resolve, actorID: p.InstanceID,
-                shapeDistance: Shape.Distance(p.Position, default)));
-        }
-        return CollectionsMarshal.AsSpan(_displayed);
-    }
-
-    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
-    {
-        var aoes = ActiveAOEs(slot, actor);
-        var len = aoes.Length;
-        for (var i = 0; i < len; ++i)
-        {
-            ref readonly var aoe = ref aoes[i];
-            if (aoe.Risky && aoe.ActorID != actor.InstanceID)
-            {
-                hints.AddForbiddenZone(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation), aoe.Activation);
-            }
-        }
-    }
-}
+// 全知烈火/劫火分散（2026-08-12 恢复 SpreadFromIcon 实现——merge 前 7.5.5.34 实测正常）：
+// 点名图标 466（Icon_loc06sp_05ak1）一出现即画 R6 圈（48418 全知烈火读条期间即可见点名黄圈），
+// 判定 = 48420 全知劫火事件（no cast，分 3 批），5.1s 判定延迟。
+// a9104c308 重构曾换成 48418 读条驱动版（读完+0.2s 才画，读条期间无点名圈），用户实测缺失，已回滚。
+sealed class AllConsumingFlames(BossModule module) : Components.SpreadFromIcon(module,
+    (uint)IconID.Icon_loc06sp_05ak1, (uint)AID.AllConsumingFlames, 6f, 5.1d);
 
 // 预言：本体 48412 读条后生成预言现象 4B63 ×3（初始 120° 分布 R9），瞬移至落点后 0.5s 读条：
 // 48413 陨石 R10 ×2 @ 南侧 (±13.4,-635.8)、48414 天崩地裂 R5-15 donut ×1 @ 北侧 (0,-612.5)（回放实测）

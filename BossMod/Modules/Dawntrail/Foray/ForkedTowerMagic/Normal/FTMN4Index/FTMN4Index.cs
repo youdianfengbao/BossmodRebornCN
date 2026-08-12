@@ -31,6 +31,8 @@ public sealed class Index : BossModule
     public Index(WorldState ws, Actor primary) : base(ws, primary, new(0f, -628f), IndexArena.InitialBounds)
     {
         ActivateComponent<ArenaShapes>();
+        ActivateComponent<FlyingDecreeGuide>(); // 击退禁区常驻（KeepOnPhaseChange：相位切换不重建，_active 窗口状态跨相位保持；2026-08-12 修复封印武器相位切换致禁区消失）
+        ActivateComponent<FlyingDecreeKnockbacks>(); // 雷达击退箭头常驻（同根因：相位切换重建致 _active 丢失 → 封印武器期间箭头消失；2026-08-12 同模式修复）
     }
 
     protected override void UpdateModule()
