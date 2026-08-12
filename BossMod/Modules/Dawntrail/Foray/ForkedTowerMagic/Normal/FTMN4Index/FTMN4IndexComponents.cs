@@ -246,10 +246,10 @@ sealed class ElementRings(BossModule module) : Components.GenericAOEs(module)
     }
 }
 
-// 击退会死区（2026-08-12 用户方案，语义修正：≤10f 内不标）：距击退来源 **>10f**（GuideRadius）且被 9y 径向击退
-// （AwayFromOrigin）后落点在战斗场地外（异形场地 + 内圈即死区挖洞，InBounds 判定）的像素禁入——
-// ≤10f 内的位置一律不标禁区（安全区）。假距离实现（先例 SDKnockbackInCircleAwayFromOrigin：Contains=0f 禁入/1f 允许，
-// ShapeDistance.cs 注释许可非真距离）。
+// 击退会死区（2026-08-12 用户最终语义：OR 关系）——距击退来源 **>10f**（GuideRadius，可能同时吃两个击退、
+// AI 无法确认存活）**或** 9y 径向击退（AwayFromOrigin）后落点在战斗场地外（异形场地 + 内圈即死区挖洞，
+// InBounds 判定）的像素禁入，满足其一即禁入；唯一安全区 = 距分身 ≤10f 且击退后落点在场内。
+// 假距离实现（先例 SDKnockbackInCircleAwayFromOrigin：Contains=0f 禁入/1f 允许，ShapeDistance.cs 注释许可非真距离）。
 sealed class KnockbackDeathZone(WPos origin, float radius, float distance, Func<WPos, bool> inBounds) : ShapeDistance
 {
     private readonly WPos _origin = origin;
@@ -261,12 +261,12 @@ sealed class KnockbackDeathZone(WPos origin, float radius, float distance, Func<
     public override bool Contains(in WPos p)
     {
         var to = p - _origin;
-        if (to.LengthSq() <= _radius * _radius)
+        if (to.LengthSq() > _radius * _radius)
         {
-            return false; // 距分身 ≤10f：不标禁区（安全区）
+            return true; // 距分身 >10f：可能同时吃两个击退，AI 无法确认存活 → 禁入
         }
         var projected = p + _distance * to.Normalized();
-        return !_inBounds(projected); // 距分身 >10f 且被 9y 击退后落点出场地 → 禁入
+        return !_inBounds(projected); // ≤10f 内但被 9y 击退后落点出场地 → 禁入
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -276,8 +276,9 @@ sealed class KnockbackDeathZone(WPos origin, float radius, float distance, Func<
 // 击退引导（FlyingDecreeGuide，2026-08-12 用户方案 v3：GoalZones 绿色引导改为 ForbiddenZone 禁入）：
 // boss 读条飞翔指令（48403）→ 三分身（4B6F）落固定三角位（北 (0,-612.5)/南西 (-13.423,-635.75)/南东 (13.423,-635.75)，R15.5）
 // → 分身 R15 圆击退 9y（AwayFromOrigin，用户实测）。
-// 禁入区（ForbiddenZone，仅 AI 视觉）：距分身 >10f（用户规则：10f 内为安全区不标）且 9y 径向击退后落点在
-// 战斗场地外（异形场地 + 内圈即死区挖洞，Arena.InBounds 判定）的像素禁入——AI 避开会死区 = 等效站击退安全区。
+// 禁入区（ForbiddenZone，仅 AI 视觉）：距分身 >10f（可能同时吃两个击退）**或** 9y 径向击退后落点在战斗场地外
+// （异形场地 + 内圈即死区挖洞，Arena.InBounds 判定）→ 禁入（OR 关系）；唯一安全 = ≤10f 且落点在场内。
+// AI 避开会死区 = 等效站击退安全区。
 // 弃用 GoalZones 绿色引导（2026-08-12 用户确认）：绿色引导受 NavigationDecision 施法门控（CastInfo==null 才栅格化
 // GoalZones）影响，AI 玩家持续施法时完全消失（08-12 回放 10:03:53 起连续闪灼实测）；ForbiddenZone 栅格化在门控之前
 // 无条件执行（NavigationDecision.Build），AI 面板始终显示。
@@ -330,7 +331,7 @@ sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
             return;
         }
 
-        // 击退会死区禁入（三分身各一，activation=default 立即生效）：距分身 >10f 且 9y 径向击退后落点在场外 → 禁入（≤10f 不标）
+        // 击退会死区禁入（三分身各一，activation=default 立即生效）：距分身 >10f 或 9y 径向击退后落点在场外 → 禁入（安全 = ≤10f 且落点在场内）
         foreach (var phantom in PhantomPositions)
         {
             hints.AddForbiddenZone(new KnockbackDeathZone(phantom, GuideRadius, KnockbackDistance, Module.Arena.InBounds));
@@ -555,10 +556,15 @@ sealed class HolyLanceShockwaves(BossModule module) : Components.GenericKnockbac
 }
 
 // 二连召唤·封印武器连招斩击：本体 48390 读条同时 Helper 48391 镰鼬之风 ×3（方向 180/-60/60），
-// 48390 结束后 Helper 48389 居合斩 ×3（方向 -120/120/0），均为 60° cone R30、6.0s 读条（回放实测）
+// 48390 结束后 Helper 48389 居合斩 ×3（方向 -120/120/0），均为 60° cone R30、6.0s 读条（回放实测）。
+// 紧迫度分级（2026-08-12 用户需求）：3s 内即将生效的项深黄（Colors.Danger + risky），其余浅黄（Colors.AOE）——
+// 基类 RiskyActivationWindow 窗口分级：距最早生效项 ≤3s 的项深黄（两批先后读条，先批读条剩余 ≤3s 起深黄，
+// 后批保持浅黄；同批 3 项同刻生效同步转深黄）
 sealed class SlashCombos(BossModule module) : ReplayValidatedCastAOEs(module)
 {
     private static readonly AOEShapeCone Cone = new(30f, 30f.Degrees());
+
+    protected override double RiskyActivationWindow => 3d; // 3s 内即将生效深黄（2026-08-12 用户需求）
 
     protected override AOEConfig? ConfigFor(uint actionID)
         => actionID is (uint)AID.WindSlash or (uint)AID.Iainuki ? new(Cone) : null;
