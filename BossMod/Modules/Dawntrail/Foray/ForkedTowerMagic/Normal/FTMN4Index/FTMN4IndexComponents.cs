@@ -58,6 +58,12 @@ sealed class ElementFloor(BossModule module) : BossComponent(module)
 // 延迟按 ACT 模板（墨汁塔普通.xml 3a/3b 触发器）：三球同现按三波 7.3/9.8/12.3s（间隔 2.5s，与 08-11 回放实测
 // 雷 7.87/冰 10.37/火 12.90 的间隔完全吻合；单波场景 ACT 3a 用 9.7s，此处统一 3b 模板首波 7.3s，实测后校准）；
 // 球到达台子（同类 Tether 363/364/365 断开）后 +0.63s cone 施放（回放实测恒定），OnUntethered 校准 activation。
+// 08-12 修复（08-12 回放冰球无预警根因，用户确认）：
+// - 每轮元素控制内多次元素创造（48400）独立计时：08-12 回放一轮内"单球→扩散圈→单球 / 扩散→扩散→三球"，
+//   若只在 48394 重置，第二批球被当作第一轮第 2 波（_spawnTime 基准错 32.7s）→ 预判 cone 提前过期 → 无预警；
+//   改为 48400 读条开始也重置（每次创造独立 _spawnTime/_wave 基准）。
+// - OnUntethered 改按 source.OID 定属性：断开事件后 tether 已清空（ID=0，BossModule 传断开后状态），
+//   原按 tether.ID 匹配 363/364/365 永远失败 → 校准（断开+0.63s）从不生效；改按球实体 OID（4B64→冰/4B65→火/4B66→雷）。
 // 紧迫度：最先生效的波次 Colors.Danger，其余 Colors.AOE（参考 ArcaneBeacon 紧迫度分级）。
 sealed class ElementOrbs(BossModule module) : Components.GenericAOEs(module)
 {
@@ -71,11 +77,15 @@ sealed class ElementOrbs(BossModule module) : Components.GenericAOEs(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：新一轮布置，重置状态
+        if (spell.Action.ID == (uint)AID.OmniElements || spell.Action.ID == (uint)AID.ElementaryEvocation)
         {
+            // 元素控制（48394）读条开始 / 元素创造（48400）读条开始：重置状态——
+            // 08-12 修复：一轮元素控制内多次创造（单球→扩散圈→单球 / 扩散→扩散→三球），每次创造独立计时基准
             _aoes.Clear();
             _known.Clear();
             _added[0] = _added[1] = _added[2] = false;
+            _ballActor[0] = _ballActor[1] = _ballActor[2] = 0;
+            _spawnTime = default;
             _wave = 0;
         }
     }
@@ -113,14 +123,16 @@ sealed class ElementOrbs(BossModule module) : Components.GenericAOEs(module)
         }
     }
 
-    // 球到达台子（同类 Tether 断开）→ +0.63s cone 施放（回放实测恒定），校准预判 activation
+    // 球到达台子（同类 Tether 断开）→ +0.63s cone 施放（回放实测恒定），校准预判 activation。
+    // 08-12 修复：断开事件后 tether 已清空（ID=0，BossModule.OnActorUntethered 传断开后状态），
+    // 原按 tether.ID 匹配 363/364/365 永远失败 → 改按 source.OID 定属性（4B65 火 / 4B66 雷 / 4B64 冰）
     public override void OnUntethered(Actor source, in ActorTetherInfo tether)
     {
-        var prop = tether.ID switch
+        var prop = source.OID switch
         {
-            (uint)TetherID.Tether_chn_m0947_t1_p => 1, // 雷 363
-            (uint)TetherID.Tether_chn_m0947_i1_p => 2, // 冰 364
-            (uint)TetherID.Tether_chn_m0947_f1_p => 0, // 火 365
+            (uint)OID.BallOfFire => 0, // 火
+            (uint)OID.BallOfLevin => 1, // 雷
+            (uint)OID.SwirlingOrb => 2, // 冰
             _ => -1
         };
         if (prop < 0 || source.InstanceID != _ballActor[prop])
@@ -234,19 +246,47 @@ sealed class ElementRings(BossModule module) : Components.GenericAOEs(module)
     }
 }
 
-// 飞翔指令击退安全引导（2026-08-12 修正激活窗口：元素阶段全程常显）：boss 读条飞翔指令（48403）→ 三分身（4B6F）落固定三角位
-// （北 (0,-612.5)/南西 (-13.423,-635.75)/南东 (13.423,-635.75)，R15.5）→ 分身 R15 圆击退 9y（AwayFromOrigin，用户实测）。
-// 绿色引导区（仅 AI 视觉 GoalZones，无 AOE 警戒区组件）：站进引导区的玩家被 9y 击退后仍在战斗场地内
-// （异形场地 + 内圈即死区挖洞，用 Module.Arena.InBounds 判定）；击退后位置 p' = p + 9 × normalize(p − 分身位置)；
-// 三分身各一引导区（重叠区自然叠加得分）。权重 0.5（可调）。
-// 窗口（与 ElementWaitGuide 一致）：48394 元素控制读条开始激活 → 48401/48905 元素整合读条结束停用，兜底 100s——
-// 绿色引导在元素阶段全程存在；boss 读条封印武器等机制时 AOE 禁区（ForbiddenZone）覆盖部分绿色区域，
-// AI 自动前往剩余绿色安全区（ForbiddenZone 避开 + GoalZones 得分天然交互，无需额外逻辑）。
+// 击退会死区（2026-08-12 用户方案，语义修正：≤10f 内不标）：距击退来源 **>10f**（GuideRadius）且被 9y 径向击退
+// （AwayFromOrigin）后落点在战斗场地外（异形场地 + 内圈即死区挖洞，InBounds 判定）的像素禁入——
+// ≤10f 内的位置一律不标禁区（安全区）。假距离实现（先例 SDKnockbackInCircleAwayFromOrigin：Contains=0f 禁入/1f 允许，
+// ShapeDistance.cs 注释许可非真距离）。
+sealed class KnockbackDeathZone(WPos origin, float radius, float distance, Func<WPos, bool> inBounds) : ShapeDistance
+{
+    private readonly WPos _origin = origin;
+    private readonly float _radius = radius;
+    private readonly float _distance = distance;
+    private readonly Func<WPos, bool> _inBounds = inBounds;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override bool Contains(in WPos p)
+    {
+        var to = p - _origin;
+        if (to.LengthSq() <= _radius * _radius)
+        {
+            return false; // 距分身 ≤10f：不标禁区（安全区）
+        }
+        var projected = p + _distance * to.Normalized();
+        return !_inBounds(projected); // 距分身 >10f 且被 9y 击退后落点出场地 → 禁入
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override float Distance(in WPos p) => Contains(p) ? 0f : 1f;
+}
+
+// 击退引导（FlyingDecreeGuide，2026-08-12 用户方案 v3：GoalZones 绿色引导改为 ForbiddenZone 禁入）：
+// boss 读条飞翔指令（48403）→ 三分身（4B6F）落固定三角位（北 (0,-612.5)/南西 (-13.423,-635.75)/南东 (13.423,-635.75)，R15.5）
+// → 分身 R15 圆击退 9y（AwayFromOrigin，用户实测）。
+// 禁入区（ForbiddenZone，仅 AI 视觉）：距分身 >10f（用户规则：10f 内为安全区不标）且 9y 径向击退后落点在
+// 战斗场地外（异形场地 + 内圈即死区挖洞，Arena.InBounds 判定）的像素禁入——AI 避开会死区 = 等效站击退安全区。
+// 弃用 GoalZones 绿色引导（2026-08-12 用户确认）：绿色引导受 NavigationDecision 施法门控（CastInfo==null 才栅格化
+// GoalZones）影响，AI 玩家持续施法时完全消失（08-12 回放 10:03:53 起连续闪灼实测）；ForbiddenZone 栅格化在门控之前
+// 无条件执行（NavigationDecision.Build），AI 面板始终显示。
+// 窗口（与 FlyingDecreeKnockbacks 雷达箭头同窗口）：48403 飞翔指令读条开始激活 → 48405/48406 冲击波读条结束停用，
+// 兜底 100s（48403 开始起算，防事件缺失）。
 sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
 {
     private const float KnockbackDistance = 9f; // 击退距离（用户实测）
-    private const float GuideRadius = 15f; // 分身击退圆半径（圈内才被击退，引导圈与之匹配）
-    private const float Weight = 0.5f; // 引导权重（可调）
+    private const float GuideRadius = 10f; // 击退引导有效半径（2026-08-12 用户规则：仅击退来源 10f 范围内有效，原 15f）
     // 分身固定三角位（2026-08-12 修复：回放 08-11 两轮位置一致；分身跳跃（48404）前尚在场地中心 (0,-628)，
     // 轮询实时位置会把引导区画在中心导致"三角位绿色引导不显示"，故用固定位）
     private static readonly WPos[] PhantomPositions =
@@ -260,16 +300,16 @@ sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：激活引导（与 ElementWaitGuide 同窗口，元素阶段全程常显）
+        if (spell.Action.ID == (uint)AID.PropulsiveProphecy) // 飞翔指令读条开始：激活引导（圣枪 4B62 常驻非触发点，以 48403 为准）
         {
             _active = true;
-            _expire = WorldState.FutureTime(100d); // 兜底窗口（正常由元素整合读条结束停用）
+            _expire = WorldState.FutureTime(100d); // 兜底窗口（正常由冲击波读条结束停用）
         }
     }
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID is (uint)AID.ElementaryChemistry or (uint)AID.UnknownWeaponskill2) // 元素整合读条结束：元素阶段收尾完成 → 停用引导
+        if (spell.Action.ID is (uint)AID.Shockwave1 or (uint)AID.Shockwave) // 冲击波 48405/48406 读条结束：飞翔阶段结束 → 停用引导
         {
             _active = false;
         }
@@ -290,19 +330,10 @@ sealed class FlyingDecreeGuide(BossModule module) : BossComponent(module)
             return;
         }
 
+        // 击退会死区禁入（三分身各一，activation=default 立即生效）：距分身 >10f 且 9y 径向击退后落点在场外 → 禁入（≤10f 不标）
         foreach (var phantom in PhantomPositions)
         {
-            // 引导区：p 在分身击退圈内（距分身 ≤ R15）且被 9y 击退（AwayFromOrigin）后仍在场地内（含即死区挖洞）→ 给分
-            hints.GoalZones.Add(p =>
-            {
-                var to = p - phantom;
-                if (to.LengthSq() > GuideRadius * GuideRadius)
-                {
-                    return 0f; // 圈外不会被击退
-                }
-                var dest = p + to.Normalized() * KnockbackDistance;
-                return Module.Arena.InBounds(dest) ? Weight : 0f;
-            });
+            hints.AddForbiddenZone(new KnockbackDeathZone(phantom, GuideRadius, KnockbackDistance, Module.Arena.InBounds));
         }
     }
 }
@@ -374,18 +405,19 @@ sealed class FlyingDecreeKnockbacks(BossModule module) : Components.GenericKnock
     }
 }
 
-// 元素机制 AI 提前等待引导（2026-08-11 用户方案）：元素阶段（球 cone / 环 cone）扇形 AOE 从场地中心向
+// 交界引导（ElementWaitGuide，2026-08-11 用户方案）：元素阶段（球 cone / 环 cone）扇形 AOE 从场地中心向
 // 六等分台子方向（0/60/120/180/240/300°）打 Fan60 R30——AI 提前站到两个相邻扇形交界处等待，
 // 预警一出只需一步跨到安全侧（符合玩家操作习惯）。
-// 交界点 = 六等分中间角方向（30/90/150/210/270/330°）@ Radius 20y（R30 覆盖到 30y，20y 处正站在两扇之间；可调）。
-// 激活：元素控制（48394）读条开始；停用：元素整合（48401 本体 / 48905 Helper，任一个读完）读条结束——
-// 元素阶段收尾完成即停用（避免与后续 FlyingDecreeGuide 分身引导冲突，交界点权重 1.0 会压过分身 0.5）。
-// 兜底窗口 100s（48394 开始起算；回放 08-11：球机制 +54~71s、环机制 +72~81s，100s 覆盖整轮元素阶段，防事件缺失）。
+// 交界点 = 六等分中间角方向（30/90/150/210/270/330°）@ Radius 9f（2026-08-12 用户计算确认：原 20y 超出 FTMN4
+// 异形场地边界——20y 处已在场外（六边形边心距仅 13y，外接正方形不覆盖中间角方向），9f 在场地内；R2.5 判定圆）。
+// 窗口（2026-08-12 用户精确窗口）：48394 元素控制读条完毕（OnCastFinished）激活 → 48401/48905 元素整合读条
+// 开始（OnCastStarted）停用——整合读条期间即停用（避免与后续击退引导冲突，交界点权重 1.0 会压过击退引导 0.5）。
+// 兜底窗口 100s（48394 读完起算；回放 08-11：球机制 +54~71s、环机制 +72~81s，100s 覆盖整轮元素阶段，防事件缺失）。
 // 权重 1.0f（高于 CenterGoal 的 0.1——元素阶段优先交界点；停用后 AI 回到中心弱引导）。
 // 得分 = 到 6 个交界点最近距离 ≤ 2.5f → 1.0f（取 min 避免多目标叠加糊权重）。
 sealed class ElementWaitGuide(BossModule module) : BossComponent(module)
 {
-    private const float Radius = 20f; // 交界点距场地中心距离（可调；R30 cone 覆盖到 30y，20y 处站在两扇之间）
+    private const float Radius = 9f; // 交界点距场地中心距离（2026-08-12 用户计算确认：20y 超出异形场地边界，9f 在场地内；可调）
     private const float AcceptRadius = 2.5f; // 交界点判定半径（可调）
     private const float Weight = 1.0f; // 引导权重（高于 CenterGoal 0.1，元素阶段优先交界点）
     private readonly WPos[] _spots = new WPos[6];
@@ -394,23 +426,23 @@ sealed class ElementWaitGuide(BossModule module) : BossComponent(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条开始：激活整轮元素阶段
+        if (spell.Action.ID is (uint)AID.ElementaryChemistry or (uint)AID.UnknownWeaponskill2) // 元素整合读条开始：元素阶段收尾 → 停用交界引导
         {
-            _active = true;
-            _expire = WorldState.FutureTime(100d); // 兜底窗口（回放：球/环机制在 48394 后 54~81s，100s 覆盖整轮；正常由元素整合读完停用）
-            var center = Module.Arena.Center;
-            for (var i = 0; i < 6; ++i)
-            {
-                _spots[i] = center + (30f + 60f * i).Degrees().ToDirection() * Radius; // 六等分中间角（台子方向之间）
-            }
+            _active = false;
         }
     }
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID is (uint)AID.ElementaryChemistry or (uint)AID.UnknownWeaponskill2) // 元素整合读条结束：元素阶段收尾完成 → 停用
+        if (spell.Action.ID == (uint)AID.OmniElements) // 元素控制读条完毕：新一轮布置完成 → 激活交界引导
         {
-            _active = false;
+            _active = true;
+            _expire = WorldState.FutureTime(100d); // 兜底窗口（回放：球/环机制在 48394 后 54~81s，100s 覆盖整轮；正常由元素整合读条开始停用）
+            var center = Module.Arena.Center;
+            for (var i = 0; i < 6; ++i)
+            {
+                _spots[i] = center + (30f + 60f * i).Degrees().ToDirection() * Radius; // 六等分中间角（台子方向之间）
+            }
         }
     }
 

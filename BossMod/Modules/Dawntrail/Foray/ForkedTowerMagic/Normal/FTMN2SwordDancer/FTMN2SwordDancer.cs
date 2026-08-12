@@ -195,10 +195,16 @@ sealed class CycloswordsPreview(BossModule module) : Components.GenericAOEs(modu
     }
 }
 
-// 剑舞（2026-08-09 用户实测重设计）：boss 读条 49609"剑舞"时首刀恒为 0°（游戏角北，用户查证确认）即可预知——
-// 画 0° 方向 Rect(30,10,30) 首刀预警区（深黄，提前 ~12.5s）+ 0° 方向 Rect(30,12,30) 绿色引导区
-// （引导 AI 靠近 0° 位置，仅 AI 视觉 GoalZones、不画雷达）；首个 49614（0°）结算后清除预警与引导（后续由危险区接管），
-// 后续刀按 49614 读条动态方向绘制（当前深黄+其余浅黄+第 4 道暂不显示），结算后矩形消失。
+// 剑舞（2026-08-12 合并上游 EAnim 方案升级"前 3 刀提前全知"）：机制链 = EAnim 标记全知预判 + 49609 首刀 0° 兜底 + 49614 按序清除。
+// 事件物件 0x1EC033 发 EAnim(0x00010002) 标记（上游 codex 实测：每刀一物件、按顺序刷出，真实读条前预绘）——
+// 收齐 4 个标记即全知 4 刀方向与时间（收齐后 6.4/8.9/11.4/13.9s 结算，间隔 2.5s），
+// 前 3 刀立即提前绘制（雷达 + AI 视觉，紧迫度分级：最先生效深黄、其余浅黄）；第 4 刀待首刀（首个 49614）结算后入列显示
+// （避免 4 刀全显遮全场，且与本地 hideLast 语义一致）；方向 = 事件物件 rotation（游戏角；Rect 前后对称 180° 无差别，
+// 无需换算）——首刀仍以本地实测恒 0°（BossMod 180°）为准（2026-08-09 用户查证；标记 1 rotation 应为游戏 0° 北，
+// 与本地一致，若回放发现偏差改取 markers[0].Rotation）。
+// 兜底互备：49609 读条缺失时 EAnim 标记仍可全知；EAnim 标记缺失/未收齐时退回 49609 首刀 0° 预警 + 49614 动态入列
+// （读条开始入列、结算移除，方向 = spell.Rotation + 180° 换算）。
+// 清除统一以 49614 读条事件为准：结算（OnCastFinished）按序移除队列首（EAnim 预画与兜底入列统一按结算顺序对齐）。
 // 残留 bug 修复（2026-08-09 用户实测）：原"结算只递进不移除"致矩形固化到下一次剑舞——GenericAOEs 基类
 // 绘制/禁区不按 activation 自动过滤（DrawArenaBackground/AddAIHints 直接遍历 ActiveAOEs），须组件在结算时移除。
 // 方向修正（2026-08-07 修复"半个矩形"）：spell.Rotation 为游戏角度（0=北），BossMod 角度 0=南，差 180°——
@@ -208,23 +214,72 @@ sealed class SwordDance(BossModule module) : Components.GenericAOEs(module)
     private static readonly AOEShapeRect Shape = new(30f, 10f, 30f); // 横穿全场（宽 20）
     private static readonly AOEShapeRect GuideShape = new(30f, 12f, 30f); // 绿色引导区（宽 24，仅 AI 视觉）
     private static readonly Angle FirstDir = 180f.Degrees(); // 首刀方向：游戏角 0°（北）→ BossMod 角 180°
-    private readonly List<AOEInstance> _slashes = [with(4)]; // 未结算的刀（劈下入列、结算移除）
+    private readonly List<(ulong ActorID, WPos Position, Angle Rotation)> _markers = [with(4)]; // EAnim 标记（0x1EC033 事件物件，收齐 4 个即消费清空，可跨轮复用）
+    private readonly List<(WPos Origin, Angle Rotation, DateTime Activation, ulong ActorID)> _preview = [with(4)]; // EAnim 全知 4 刀（位置/方向/时间/来源）
+    private bool _previewReady; // 本轮到 4 标记收齐（EAnim 方案生效：前 3 刀已入列）
+    private readonly List<AOEInstance> _slashes = [with(4)]; // 未结算的刀（EAnim 预画 / 49614 兜底入列），按结算顺序
     private readonly List<AOEInstance> _displayed = [with(4)]; // 雷达
     private readonly List<AOEInstance> _ai = [with(4)]; // AI 禁区
     private bool _firstActive; // 首刀预警区/绿色引导区有效（49609 读条开始 → 首个 49614 结算）
+    private int _resolved; // 已结算刀数（按序移除、第 4 刀入列时机、首刀结算判定）
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(_displayed);
 
+    // EAnim 标记收集（上游 codex 方案，2026-08-12 吸收）：0x1EC033 事件物件发 EAnim(0x00010002) 预绘标记，
+    // 收齐 4 个即全知 4 刀方向与时间（6.4/8.9/11.4/13.9s）——前 3 刀提前入列（雷达 + AI 视觉），第 4 刀待首刀结算
+    public override void OnActorEAnim(Actor actor, uint state)
+    {
+        if (state != 0x00010002 || actor.OID != (uint)OID.Actor1ec033)
+        {
+            return;
+        }
+        if (_markers.Any(m => m.ActorID == actor.InstanceID))
+        {
+            return;
+        }
+
+        _markers.Add((actor.InstanceID, actor.Position, actor.Rotation));
+        if (_markers.Count < 4)
+        {
+            return;
+        }
+
+        // 4 标记收齐：全知 4 刀（方向 = 事件物件 rotation；首刀 = 本地实测恒 0°、origin = 场地中心）
+        List<(ulong ActorID, WPos Position, Angle Rotation)> markers = [.. _markers];
+        _markers.Clear(); // 消费后清空，可收下一轮标记
+        _previewReady = true;
+        var baseTime = WorldState.CurrentTime;
+        _preview.Clear();
+        for (var i = 0; i < 4; ++i)
+        {
+            var rotation = i == 0 ? FirstDir : markers[i].Rotation; // 首刀以本地实测 0° 为准（标记 1 应为游戏 0° 北）
+            var origin = i == 0 ? Module.Center : markers[i].Position; // 首刀以场地中心为 origin（回放实测 49614 施法者=中心）
+            _preview.Add((origin, rotation, baseTime.AddSeconds(6.4d + 2.5d * i), markers[i].ActorID));
+        }
+        _slashes.Clear();
+        for (var i = 0; i < 3; ++i) // 前 3 刀提前全知入列；第 4 刀待首刀结算后显示
+        {
+            var p = _preview[i];
+            _slashes.Add(new(Shape, p.Origin, p.Rotation, p.Activation, actorID: p.ActorID));
+        }
+    }
+
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.SwordDance1) // 49609 剑舞：首刀恒为 0°（北），立即预知预警+引导
+        if (spell.Action.ID == (uint)AID.SwordDance1) // 49609 剑舞：新一轮重置 + 首刀恒为 0°（北）预警/引导
         {
             _slashes.Clear();
+            _preview.Clear();
+            _previewReady = false;
+            _resolved = 0;
             _firstActive = true;
         }
-        else if (spell.Action.ID == (uint)AID.SwordDance6) // 49614 直条劈下（后续刀，实际方向动态）
+        else if (spell.Action.ID == (uint)AID.SwordDance6) // 49614 直条劈下：EAnim 未提供该刀（标记缺失/未收齐）时动态入列兜底
         {
-            _slashes.Add(new(Shape, caster.Position, spell.Rotation + 180f.Degrees(), Module.CastFinishAt(spell), actorID: caster.InstanceID));
+            if (!_previewReady)
+            {
+                _slashes.Add(new(Shape, caster.Position, spell.Rotation + 180f.Degrees(), Module.CastFinishAt(spell), actorID: caster.InstanceID));
+            }
         }
     }
 
@@ -232,10 +287,19 @@ sealed class SwordDance(BossModule module) : Components.GenericAOEs(module)
     {
         if (spell.Action.ID == (uint)AID.SwordDance6)
         {
-            _slashes.RemoveAll(s => s.ActorID == caster.InstanceID); // 结算后矩形消失（修复固化残留）
+            if (_slashes.Count > 0)
+            {
+                _slashes.RemoveAt(0); // 按序移除当前刀（EAnim 预画与兜底统一按结算顺序，修复固化残留）
+            }
+            ++_resolved;
             if (_firstActive)
             {
-                _firstActive = false; // 首个 49614 结算 = 首刀结算：清除 0° 预警区与绿色引导区（后续由危险区接管）
+                _firstActive = false; // 首刀（首个 49614）结算：清除 0° 预警区与绿色引导区（后续由危险区接管）
+            }
+            if (_previewReady && _resolved == 1 && _preview.Count >= 4)
+            {
+                var p = _preview[3]; // 首刀已结算：第 4 刀入列显示（方向 = 第 4 标记 rotation）
+                _slashes.Add(new(Shape, p.Origin, p.Rotation, p.Activation, actorID: p.ActorID));
             }
         }
     }
@@ -244,7 +308,7 @@ sealed class SwordDance(BossModule module) : Components.GenericAOEs(module)
     {
         _displayed.Clear();
         _ai.Clear();
-        if (_firstActive) // 首刀 0° 预警区（深黄，雷达 + AI 禁区）
+        if (_firstActive && !_previewReady) // 首刀 0° 预警区（49609 → EAnim 收齐窗口 / EAnim 缺失全程；收齐后由 _slashes 首刀承担，避免重复）
         {
             var first = new AOEInstance(Shape, Module.Center, FirstDir, default, Colors.Danger, true);
             _displayed.Add(first);
@@ -257,7 +321,7 @@ sealed class SwordDance(BossModule module) : Components.GenericAOEs(module)
             return;
         }
 
-        var hideLast = count >= 4; // 4 道全劈且 0 结算（结算即移除 → count=4 即全在读条）→ 第 4 道暂不显示
+        var hideLast = count >= 4; // 兜底路径 4 道全劈（EAnim 路径最多 3 道在列）→ 第 4 道暂不显示
         for (var i = 0; i < count; ++i)
         {
             if (hideLast && i == count - 1)

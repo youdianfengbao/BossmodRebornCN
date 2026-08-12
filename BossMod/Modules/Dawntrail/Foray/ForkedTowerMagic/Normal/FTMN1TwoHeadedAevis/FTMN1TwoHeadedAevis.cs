@@ -25,11 +25,11 @@ namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN1TwoHeadedAevis;
 // 回放实测（2026-08-06 三场）：本体 0x4C11 全程不可目标化（tgt=False），默认 CheckPull 永不成立，
 // 故 override CheckPull 用绿/蓝头可目标化作为拉怪条件；出战斗端本体 DIE+（HP 归零）触发 DeathPhase 结束，
 // 无需改 States、无需改回 PrimaryActorOID（0x4C12 无 DIE+/ACT-，改回反而出战斗不识别）。
-// 场地方形半宽 20f：用户实测 20f 方形（边长 40）；回放实测玩家贴西墙停点 x=-918.4（相对中心 -900 偏移 18.4）
-// 仍全落在墙 ±20 内，半宽 18 会越界。
+// 场地方形半宽 19.7f（2026-08-12 用户要求缩小 0.3f，原 20f；与 FTMN2/FTMN3 已改的 23.7f 同理，避免走位太靠场边）；
+// 回放实测玩家贴西墙停点 x=-918.4（相对中心 -900 偏移 18.4）仍全落在墙 ±19.7 内，半宽 18 会越界。
 public sealed class TwoHeadedAevis : BossModule
 {
-    public TwoHeadedAevis(WorldState ws, Actor primary) : base(ws, primary, new(-900f, 700f), new ArenaBoundsSquare(20f))
+    public TwoHeadedAevis(WorldState ws, Actor primary) : base(ws, primary, new(-900f, 700f), new ArenaBoundsSquare(19.7f))
     {
         ActivateComponent<BlazeGuide>(); // 钢铁月环绿圈引导（KeepOnPhaseChange，跨相位常驻）
         ActivateComponent<WeakGuide>(); // 弱引导矩形（KeepOnPhaseChange，跨相位常驻）
@@ -40,19 +40,67 @@ public sealed class TwoHeadedAevis : BossModule
 
 // ==================== 组件（形状/时机均来自 2026-08-06 三场回放实测） ====================
 
-// 弱引导矩形（2026-08-07 用户实测）：对角 (-888,708)-(-912,687)，最弱正向引导，AI 无其他干扰时倾向进入
+// 弱引导矩形（2026-08-07 用户实测）：对角 (-888,708)-(-912,687)，最弱正向引导，AI 无其他干扰时倾向进入。
+// 2026-08-12 用户要求：有**任何其他禁入区**（其他组件 AOE 禁区/ForbiddenZone）存在时整体失效——
+// 避免机制活跃时 AI 仍被 0.1 弱引导牵引；失效判据在 Update 轮询组件判定（不用 AddAIHints 检查
+// hints.ForbiddenZones——CalculateAIHints 按组件激活顺序共享 hints，本组件最早激活看不到其他组件本帧禁区，
+// 顺序依赖不可靠）：
+// - GenericAOEs 子类组件有活动 AOE（读条中，本帧必加禁区）；
+// - StormBreath 风暴带禁入区（Active=读条中）；
+// - 任一队伍成员带诅咒 5403/5404（CursedTimer 下风口半场禁入区，持续到结算）。
 sealed class WeakGuide(BossModule module) : BossComponent(module)
 {
     private static readonly WPos Center = new(-900f, 697.5f); // x 中心 -900（半宽 12，2026-08-09 用户调整）、z 中心 697.5（半宽 10.5）
     private const float HalfX = 12f; // x ∈ [-912, -888]
     private const float HalfZ = 10.5f; // z ∈ [687, 708]
+    private bool _disabled; // 有其他禁入区存在时失效
 
     public override bool KeepOnPhaseChange => true; // 常驻弱引导
 
+    public override void Update()
+    {
+        _disabled = false;
+        var player = Raid[PartyState.PlayerSlot];
+        foreach (var comp in Module.Components)
+        {
+            if (comp == this)
+            {
+                continue;
+            }
+            if (comp is Components.GenericAOEs aoes && player != null && aoes.ActiveAOEs(PartyState.PlayerSlot, player).Length > 0)
+            {
+                _disabled = true; // 其他组件有活动 AOE（读条中 → 本帧加禁区）
+                break;
+            }
+            if (comp is StormBreath storm && storm.Active)
+            {
+                _disabled = true; // 风暴带禁入区
+                break;
+            }
+        }
+        if (_disabled)
+        {
+            return;
+        }
+        foreach (var p in Raid.WithoutSlot())
+        {
+            if (p.FindStatus((uint)SID.EasterlyReprise) != null || p.FindStatus((uint)SID.WesterlyReprise) != null)
+            {
+                _disabled = true; // 诅咒禁入区（持续到诅咒结算）
+                break;
+            }
+        }
+    }
+
     // 最弱正向引导（weight 0.1，先例 DeepDungeon GoalSingleTarget(_, 3, 0.1f)）：
-    // GoalZones 各得分相加，其他机制的强制目标（1f 及以上）会完全覆盖 0.1f，故仅无干扰时 AI 倾向进入矩形
+    // GoalZones 各得分相加，其他机制的强制目标（1f 及以上）会完全覆盖 0.1f，故仅无干扰时 AI 倾向进入矩形；
+    // 有其他禁入区（_disabled）时不加引导（整体失效，矩形不再牵引 AI）
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        if (_disabled)
+        {
+            return;
+        }
         hints.GoalZones.Add(p => Math.Abs(p.X - Center.X) <= HalfX && Math.Abs(p.Z - Center.Z) <= HalfZ ? 0.1f : 0f);
     }
 }
@@ -60,7 +108,7 @@ sealed class WeakGuide(BossModule module) : BossComponent(module)
 // 决战（开战全屏 AoE）：本体 49727 + 双头 49726 同步读条 4.7s，回放确认全屏无落点
 sealed class OpeningClash(BossModule module) : Components.RaidwideCast(module, (uint)AID.Ability_DecisiveClash1, "决战：全屏伤害");
 
-// 剧毒吐息：Helper 47617 在场地中心放 R18 大圈（回放实测 loc=中心 (-900,700)，R18>半宽 17.5，四角安全）。
+// 剧毒吐息：Helper 47617 在场地中心放 R18 大圈（回放实测 loc=中心 (-900,700)，R18 覆盖中心大半场——半宽 19.7，四角距中心 27.9 在圈外安全）。
 // 诅咒复合（2026-08-09 用户方案，参照 Clusters）：定时诅咒复合时 AI 禁区 = R18 圈沿击退反方向平移 20f
 // （等价变换：落点(P+D)∈C ⟺ P∈(C−D)；5403 东风→平移东 20f、5404 西风→平移西 20f）；
 // 雷达显示（ActiveAOEs）保持原始位置不动；无诅咒 → 基类常规危险区（不平移）。
@@ -297,8 +345,9 @@ sealed class CursedTimer(BossModule module) : Components.GenericKnockback(module
 
     // 防出界机制（2026-08-07 用户要求：所有击退事件）——定时诅咒定向击退 20y 的带形禁区
     // （通用几何：落点 P+D 出界 ⟺ P 不在"场地沿击退方向平移 D 后的区域"内 → 危险带=原场地−平移后场地；
-    // FTMN1 特例：方形半宽 20、中心 (-900,700)——5403 东风→西带 x∈[-920,-900]、5404 西风→东带 x∈[-900,-880]，
-    // 从墙内缘向场内延伸 20y、z 全宽 40；激活时间=诅咒结算时刻；自 Clusters 迁移至此（击退组件归属正确，
+    // FTMN1 特例：方形半宽 19.7（2026-08-12 随场地缩小 0.3f）、中心 (-900,700)——5403 东风→西带 x∈[-919.7,-900]、
+    // 5404 西风→东带 x∈[-900,-880.3]，从墙内缘向场内延伸 19.7y、z 全宽 39.4；中心±0.3y 窄条漏标
+    // （击退出界 ≤0.3y，stopAtWall 兜底无实际危害）；激活时间=诅咒结算时刻；自 Clusters 迁移至此（击退组件归属正确，
     // 无簇 AOE 时同样生效）；仅 AI 视觉（AddForbiddenZone），雷达不变
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
@@ -308,11 +357,11 @@ sealed class CursedTimer(BossModule module) : Components.GenericKnockback(module
             return;
         }
 
-        // 诅咒禁入区（2026-08-07 用户修正）：带诅咒期间下风口半场持续禁入——
-        // 5403 东风（向西吹）→ 下风口=西 → 西半区带 x∈[-920,-900]；5404 西风 → 东半区带 x∈[-900,-880]；
+        // 诅咒禁入区（2026-08-07 用户修正；2026-08-12 带宽随场地 19.7 收窄）：带诅咒期间下风口半场持续禁入——
+        // 5403 东风（向西吹）→ 下风口=西 → 西半区带 x∈[-919.7,-900]；5404 西风 → 东半区带 x∈[-900,-880.3]；
         // 无条件添加（持续到诅咒结算/消失）；activation=default → 栅格 G=0 立即死区，AI 全程避开（避免靠近才被推开）
         var east = kb.Value.Direction.Rad >= 0; // 5404 西风 → 向东击退 → 东带；5403 东风 → 西带
-        hints.AddForbiddenZone(new AOEShapeRect(20f, 20f), new WPos(-900f, 700f), (east ? 90f : -90f).Degrees());
+        hints.AddForbiddenZone(new AOEShapeRect(19.7f, 19.7f), new WPos(-900f, 700f), (east ? 90f : -90f).Degrees());
     }
 }
 
