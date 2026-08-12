@@ -68,15 +68,24 @@ sealed class ElementFloor(BossModule module) : BossComponent(module)
 // 预判（生成+7.3s）在 OnUntethered 校准（断开+0.63s）前已被 activation+0.5s 清理点删除 → 校准落空 → 预警提前消失；
 // 改为 OnEventCast（48396/48397/48398 实际施放）按属性+activation 校验移除预判项（预警保留到 cone 打出，
 // activation 校验防环机制同 AID cone 误删），ActiveAOEs 清理宽限 0.5s→3s 兜底（预判项存活到校准）。
+// 08-13 波次分配改按角距排序（用户方案）：台子每轮随机布置 → 各球结算顺序随机（角距决定），
+// 原按球检测顺序分配波次模板（7.3/9.8/12.3s）与结算顺序无必然关系 → 预判期紧迫度颠倒（该躲的球浅黄）；
+// 改为检测时记录球到同属性台子双扇的顺时针角距（ClockwiseDiff，BossMod 角递减），批收集完成
+// （三属性齐或 0.5s 无新球）后按角距小→大排序分配早→晚波次；08-13 回放验证：本轮角距 雷30°/冰90°/火150°
+// 与实际结算 雷7.72s/冰10.20s/火12.12s 顺序一致；Tether 断开校准（+0.63s）仍精确修正 activation。
 // 紧迫度：最先生效的波次 Colors.Danger，其余 Colors.AOE（参考 ArcaneBeacon 紧迫度分级）。
 sealed class ElementOrbs(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeCone Cone = new(30f, 30f.Degrees());
     private readonly List<AOEInstance> _aoes = [];
     private readonly HashSet<ulong> _known = [];
-    private readonly bool[] _added = new bool[3]; // 每属性已添加（对侧双扇只画一次）
+    private readonly bool[] _added = new bool[3]; // 每属性已记录（对侧双扇只画一次）
     private readonly ulong[] _ballActor = new ulong[3]; // 每属性首球 InstanceID（Tether 校准匹配用）
-    private DateTime _spawnTime; // 本轮首次球生成时刻（波次延迟基准）
+    private readonly Angle[] _ballDir = new Angle[3]; // 每属性台子方向（GetDir，排序分配时用）
+    private readonly float[] _ballAngle = new float[3]; // 每属性首球到台子双扇的顺时针角距（弧度，排序分配用）
+    private int _pendingCount; // 本批已记录角距的属性数（批齐/超时后排序分配）
+    private DateTime _lastSeen; // 最后检测到新球时刻（0.5s 无新球 → 批收集完成）
+    private DateTime _spawnTime; // 本批波次延迟基准（分配时刻）
     private int _wave;
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
@@ -113,18 +122,56 @@ sealed class ElementOrbs(BossModule module) : Components.GenericAOEs(module)
                 }
                 _added[prop] = true;
                 _ballActor[prop] = b.InstanceID;
-
-                if (_wave == 0)
-                {
-                    _spawnTime = WorldState.CurrentTime;
-                }
-
-                ++_wave;
-                var activation = _spawnTime.AddSeconds(7.3f + (_wave - 1) * 2.5f); // ACT 模板 3b（三波 7.3/9.8/12.3；单波 3a 为 9.7s，统一此模板，实测后校准）
-                _aoes.Add(new(Cone, Module.Arena.Center, dir, activation, actorID: b.InstanceID));
-                _aoes.Add(new(Cone, Module.Arena.Center, dir + 180f.Degrees(), activation, actorID: b.InstanceID));
+                _ballDir[prop] = dir;
+                // 角距 = 球顺时针（BossMod 角递减）转到台子双扇（台子方向或对侧）的最近行程
+                // （2026-08-13 用户方案：台子每轮随机布置 → 结算顺序随机，原按检测顺序分配波次曾致紧迫度颠倒；
+                // 08-13 回放验证：本轮角距 雷30°/冰90°/火150° 与实际结算顺序 雷7.72s/冰10.20s/火12.12s 一致）
+                var toBall = Angle.FromDirection(b.Position - Module.Arena.Center);
+                var d1 = ClockwiseDiff(toBall, dir);
+                var d2 = ClockwiseDiff(toBall, dir + 180f.Degrees());
+                _ballAngle[prop] = MathF.Min(d1, d2);
+                _lastSeen = WorldState.CurrentTime;
+                ++_pendingCount;
             }
         }
+
+        // 批收集完成（三属性齐或 0.5s 无新球）→ 按角距排序分配波次
+        if (_pendingCount > 0 && WorldState.CurrentTime - _lastSeen > TimeSpan.FromSeconds(0.5d))
+        {
+            AssignWaves();
+        }
+    }
+
+    // 顺时针（BossMod 角递减）从 from 到 to 的行程（0..2π 正角）
+    private static float ClockwiseDiff(Angle from, Angle to) => ((from - to).Normalized().Rad + MathF.Tau) % MathF.Tau;
+
+    // 按角距从小到大排序属性 → 分配波次模板 7.3/9.8/12.3s（角距小 = 先到台子 = 先结算 = 早波次；
+    // 单/双球批直接按序；Tether 断开校准仍精确修正 activation）
+    private void AssignWaves()
+    {
+        var order = new List<int>(_pendingCount);
+        for (var i = 0; i < 3; ++i)
+        {
+            if (_added[i])
+            {
+                order.Add(i);
+            }
+        }
+        order.Sort((x, y) => _ballAngle[x].CompareTo(_ballAngle[y]));
+        foreach (var prop in order)
+        {
+            if (_wave == 0)
+            {
+                _spawnTime = WorldState.CurrentTime;
+            }
+
+            ++_wave;
+            var activation = _spawnTime.AddSeconds(7.3f + (_wave - 1) * 2.5f); // ACT 模板 3b（三波 7.3/9.8/12.3；单波 3a 为 9.7s，统一此模板，实测后校准）
+            var dir = _ballDir[prop];
+            _aoes.Add(new(Cone, Module.Arena.Center, dir, activation, actorID: _ballActor[prop]));
+            _aoes.Add(new(Cone, Module.Arena.Center, dir + 180f.Degrees(), activation, actorID: _ballActor[prop]));
+        }
+        _pendingCount = 0;
     }
 
     // 球到达台子（同类 Tether 断开）→ +0.63s cone 施放（回放实测恒定），校准预判 activation。

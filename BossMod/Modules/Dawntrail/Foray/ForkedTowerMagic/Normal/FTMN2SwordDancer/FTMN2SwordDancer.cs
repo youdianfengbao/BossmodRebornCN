@@ -498,6 +498,10 @@ sealed class Rush(BossModule module) : Components.SimpleAOEs(module, (uint)AID.R
 // 起始角 = 从中心指向剑位置的方向（2026-08-09 回放验证：顺 id 剑移动目标=起点顺 90°（如 49563 剑北→落点东）、
 // 逆 id=起点逆 90°（如 49568 剑南→落点东），落点=弧终点；收尾 id（78/67.5）落点仍为 90° 位置、弧角按用户实测收窄）；
 // 顺=顺时针扫、逆=逆时针扫（BossMod 角 0=南、+90=东、顺时针=角度递减：顺弧中心=起点-半角、逆弧=起点+半角）。
+// 清除时机（2026-08-12 用户实测修复）：动画判定——读条 3.2s 期间剑停在起点（回放 08-12 09:47:55.83 CST+ 剑在
+// (600,725.49)、09:47:59.32 CST! 时剑仍在起点），读条结束（CST!）后 ~0.3s 起飞沿弧飞 ~0.8s 到达落点才结算；
+// 原 OnCastFinished/OnEventCast 读条结束即清除危险区 → AI 在飞剑飞行期间走进环扇吃伤害；
+// 改为轮询 4D77 剑位置到达落点（cast 落点，距 ≤1y）才清除（Update 到达判定 + 3s 兜底超时）。
 sealed class Turn(BossModule module) : Components.GenericAOEs(module, warningText: "躲避回旋环扇")
 {
     private static readonly WPos Center = new(600f, 704f); // 转动圆心 = 场地中心
@@ -517,6 +521,7 @@ sealed class Turn(BossModule module) : Components.GenericAOEs(module, warningTex
     };
 
     private readonly List<AOEInstance> _aoes = [];
+    private readonly List<(ulong ActorID, WPos Destination, DateTime CastEnd)> _flying = [with(4)]; // 读条结束后的飞剑（动画飞行中，到达落点才结算）
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(_aoes);
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
@@ -532,13 +537,57 @@ sealed class Turn(BossModule module) : Components.GenericAOEs(module, warningTex
         var rot = p.cw ? start - (p.angle / 2f).Degrees() : start + (p.angle / 2f).Degrees();
         var shape = new AOEShapeDonutSector(p.inner, p.outer, (p.angle / 2f).Degrees());
         _aoes.Add(new(shape, Center, rot, Module.CastFinishAt(spell), actorID: caster.InstanceID, shapeDistance: shape.Distance(Center, rot)));
+        // 落点 = cast 落点（08-13 回放验证：读条期间剑停在起点，读条结束（CST!）后起飞沿弧飞 ~0.5-1s 到达落点才结算）
+        _flying.Add((caster.InstanceID, spell.LocXZ, Module.CastFinishAt(spell)));
+    }
+
+    public override void Update()
+    {
+        // 飞剑到达落点（距落点 ≤1y）→ 危险区结算清除（2026-08-12 修复：原 OnCastFinished/OnEventCast 读条结束即清除，
+        // 但回放 08-12 09:47:59 实测读条结束时剑尚在起点、CST! 后 ~0.3s 才起飞飞行、~0.8s 到达落点——
+        // 立即清除致 AI 在飞剑飞行期间走进环扇吃伤害；改轮询剑位置到达落点再清除）；兜底超时 3s（防剑实体缺失）
+        foreach (var f in _flying)
+        {
+            TryResolve(f.ActorID);
+        }
+    }
+
+    // 到达判定：剑（4D77，按 InstanceID）位置距落点 ≤1y 或兜底超时 → 移除危险区与飞行项
+    private void TryResolve(ulong actorID)
+    {
+        var flying = _flying;
+        var count = flying.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            var f = flying[i];
+            if (f.ActorID != actorID)
+            {
+                continue;
+            }
+
+            var arrived = false;
+            foreach (var sword in Module.Enemies((uint)OID.DancingSword4))
+            {
+                if (sword.InstanceID == actorID && !sword.IsDeadOrDestroyed && (sword.Position - f.Destination).LengthSq() <= 1f)
+                {
+                    arrived = true;
+                    break;
+                }
+            }
+            if (arrived || WorldState.CurrentTime > f.CastEnd.AddSeconds(3d)) // 到达落点或兜底超时
+            {
+                _aoes.RemoveAll(a => a.ActorID == actorID);
+                flying.RemoveAt(i);
+                return;
+            }
+        }
     }
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
         if (Param(spell.Action.ID).angle != 0)
         {
-            _aoes.RemoveAll(a => a.ActorID == caster.InstanceID);
+            TryResolve(caster.InstanceID); // 读条结束时剑通常未起飞（起点），到达判定由 Update 完成；事件触发时已到达则立即清除
         }
     }
 
@@ -547,7 +596,7 @@ sealed class Turn(BossModule module) : Components.GenericAOEs(module, warningTex
         if (Param(spell.Action.ID).angle != 0)
         {
             ++NumCasts;
-            _aoes.RemoveAll(a => a.ActorID == caster.InstanceID);
+            TryResolve(caster.InstanceID); // AIE+ 与读条结束同刻（剑未起飞）→ 通常不触发清除，由 Update 到达判定接管
         }
     }
 }
