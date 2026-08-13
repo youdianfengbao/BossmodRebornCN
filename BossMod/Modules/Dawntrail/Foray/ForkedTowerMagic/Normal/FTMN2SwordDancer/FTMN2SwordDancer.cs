@@ -546,13 +546,31 @@ sealed class Turn(BossModule module) : Components.GenericAOEs(module, warningTex
         // 飞剑到达落点（距落点 ≤1y）→ 危险区结算清除（2026-08-12 修复：原 OnCastFinished/OnEventCast 读条结束即清除，
         // 但回放 08-12 09:47:59 实测读条结束时剑尚在起点、CST! 后 ~0.3s 才起飞飞行、~0.8s 到达落点——
         // 立即清除致 AI 在飞剑飞行期间走进环扇吃伤害；改轮询剑位置到达落点再清除）；兜底超时 3s（防剑实体缺失）
-        foreach (var f in _flying)
+        // v2（2026-08-13 修复）：倒序 for + 移除内联——原 foreach 遍历 _flying 中调 TryResolve（内部 flying.RemoveAt
+        // 修改同一 List）触发枚举器版本检查抛 InvalidOperationException → 组件异常 → BMM 判模块崩溃卸载 → 雷达消失、
+        // 后续预警全无（用户实测）；事件回调上下文（OnCastFinished/OnEventCast）的 TryResolve 不受影响，保留
+        for (var i = _flying.Count - 1; i >= 0; --i)
         {
-            TryResolve(f.ActorID);
+            var f = _flying[i];
+            var arrived = false;
+            foreach (var sword in Module.Enemies((uint)OID.DancingSword4))
+            {
+                if (sword.InstanceID == f.ActorID && !sword.IsDeadOrDestroyed && (sword.Position - f.Destination).LengthSq() <= 1f)
+                {
+                    arrived = true;
+                    break;
+                }
+            }
+            if (arrived || WorldState.CurrentTime > f.CastEnd.AddSeconds(3d)) // 到达落点或兜底超时
+            {
+                _aoes.RemoveAll(a => a.ActorID == f.ActorID);
+                _flying.RemoveAt(i);
+            }
         }
     }
 
     // 到达判定：剑（4D77，按 InstanceID）位置距落点 ≤1y 或兜底超时 → 移除危险区与飞行项
+    // （仅事件回调上下文使用：OnCastFinished/OnEventCast 不在任何遍历中，RemoveAt 安全）
     private void TryResolve(ulong actorID)
     {
         var flying = _flying;

@@ -695,7 +695,8 @@ sealed class AllConsumingFlames(BossModule module) : Components.SpreadFromIcon(m
 // - OnTethered（88，source=Index2 4B72）记录落点 = Index2 位置
 // - OnStatusGain（2552，extra 0x44C 天崩 Donut 5-15 / 0x44D 陨石 Circle R10）记录类型
 // - Update 补添前置项（Tether 与状态同毫秒到达、顺序不定；落点+类型齐备且未添加时添加）
-// - 前置项：origin=Index2 落点、activation=前置时刻+9.4s、risky=true（AI 提前避开）、浅黄视觉；
+// - 前置项：origin=Index2 落点、activation=前置时刻+9.4s、risky=true（AI 提前避开）、深黄最紧迫
+//   （Colors.Danger，2026-08-13 用户确认：预言预警全程最紧迫、无临近分级）；
 //   0.2s 读条到达时移除同落点前置项（读条精确项由基类接管，防双显示）；Activation+0.5s 过期清除；48394 重置。
 sealed class ProphecyMeteors(BossModule module) : ReplayValidatedCastAOEs(module)
 {
@@ -757,7 +758,8 @@ sealed class ProphecyMeteors(BossModule module) : ReplayValidatedCastAOEs(module
             if (_previewed.Add(id) && _targets.TryGetValue(id, out var origin))
             {
                 AOEShape shape = extra == 0x44C ? CleansingShape : StarfallShape; // 0x44C 天崩（月环）/ 0x44D 陨石
-                _preview.Add(new(shape, origin, default, WorldState.FutureTime(9.4d), Colors.AOE, actorID: id, shapeDistance: shape.Distance(origin, default)));
+                // 紧迫度全程最紧迫（2026-08-13 用户确认：预言预警无临近分级、全程深黄；risky 默认 true AI 全程避开）
+                _preview.Add(new(shape, origin, default, WorldState.FutureTime(9.4d), Colors.Danger, actorID: id, shapeDistance: shape.Distance(origin, default)));
             }
         }
         base.Update();
