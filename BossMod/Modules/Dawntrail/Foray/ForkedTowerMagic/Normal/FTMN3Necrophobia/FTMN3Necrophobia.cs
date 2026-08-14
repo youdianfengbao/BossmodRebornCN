@@ -22,7 +22,19 @@ namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN3Necrophobia;
     PlanLevel = 0)]
 [SkipLocalsInit]
 // 场地圆形 R23.7：merge codex 后按用户修正（原 24f 略大）。
-public sealed class Necrophobia(WorldState ws, Actor primary) : BossModule(ws, primary, new(100f, 800f), new ArenaBoundsCircle(23.7f));
+public sealed class Necrophobia(WorldState ws, Actor primary) : BossModule(ws, primary, new(100f, 800f), new ArenaBoundsCircle(23.7f))
+{
+    // 死亡兜底（2026-08-14 参照 FTMN2 深查修复补齐）：boss 提前死亡（DIE+）时强制结束状态机（StateMachine.Reset），
+    // 保证模块被 BMM 卸载（BMM 仅当 ActiveState==null 时卸载）——覆盖状态机卡在中间相位、
+    // boss 提前死亡等场景，避免雷达被本模块持续占用挡掉后续事件
+    protected override void UpdateModule()
+    {
+        if (PrimaryActor.IsDeadOrDestroyed && StateMachine.ActiveState != null)
+        {
+            StateMachine.Reset();
+        }
+    }
+}
 
 // ==================== 组件（形状/时机均来自 2026-08-06 三场回放实测） ====================
 // 角度说明：读条 rotation（spell.Rotation）即 BossMod 使用的实际朝向（ToDirection 方向 (sinθ, cosθ)，

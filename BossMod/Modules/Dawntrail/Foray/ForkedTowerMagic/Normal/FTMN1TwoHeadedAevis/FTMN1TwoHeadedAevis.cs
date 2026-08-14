@@ -36,6 +36,17 @@ public sealed class TwoHeadedAevis : BossModule
     }
 
     protected override bool CheckPull() => PrimaryActor.InCombat && (PrimaryActor.IsTargetable || IsAnyActorTargetable((uint)OID.GreenHead1) || IsAnyActorTargetable((uint)OID.BlueHead1));
+
+    // 死亡兜底（2026-08-14 参照 FTMN2 深查修复补齐）：boss 提前死亡（DIE+）时强制结束状态机（StateMachine.Reset），
+    // 保证模块被 BMM 卸载（BMM 仅当 ActiveState==null 时卸载）——覆盖状态机卡在中间相位、
+    // boss 提前死亡等场景，避免雷达被本模块持续占用挡掉后续事件
+    protected override void UpdateModule()
+    {
+        if (PrimaryActor.IsDeadOrDestroyed && StateMachine.ActiveState != null)
+        {
+            StateMachine.Reset();
+        }
+    }
 }
 
 // ==================== 组件（形状/时机均来自 2026-08-06 三场回放实测） ====================
