@@ -17,8 +17,8 @@ public enum AID : uint
     CentralWhipVisual = 0xB872, // boss->self, 4.7s cast, visual for CentralWhip
     SideWhipVisual = 0xB873, // boss->self, 4.7s cast, visual for SideWhip
     CentralWhip = 0xB874, // helper, 5.7s cast, 中央鞭打, through-body line (52y long, 10y wide)
-    SideWhip = 0xB875, // helper, 5.7s cast, 侧方鞭打, one 135-degree cone (26y)
-    SideWhip2 = 0xC241, // helper, 5.7s cast, 侧方鞭打, opposite 135-degree cone (26y)
+    SideWhip = 0xB875, // helper, 5.7s cast, 侧方鞭打（正侧，实测 2026-08-15：圆心=helper 沿 rotation-90° 偏移 5y、180° 半圆 r30，平分线朝外）
+    SideWhip2 = 0xC241, // helper, 5.7s cast, 侧方鞭打（反侧，实测 2026-08-15：圆心=helper 沿 rotation+90° 偏移 5y、180° 半圆 r30，平分线朝外）
 
     PollenScatter = 0xB876, // boss->self, 3.7s cast, 花粉飞散, visual precursor for Predation
     Predation = 0xB877, // boss, 6.7s cast, 捕食, 10y circle
@@ -60,10 +60,7 @@ sealed class ManyMouthsAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 {
     // 52y long / 10y wide line, centered on the caster (extends front and back).
     private static readonly AOEShapeRect CentralLine = new(26f, 5f, 26f);
-    // Side whip is a pair of opposing 135-degree cones; the safe gap is the narrow front/back sliver.
-    // Replay-verified: B875 hits span +18..+161 deg from facing (C241 the mirrored -138..-16),
-    // i.e. a 135-degree cone - the official sheet's fan180 Omen is not representative here.
-    private static readonly AOEShapeCone Whip = new(26f, 67.5f.Degrees());
+    // 侧方鞭打已迁至 SideLashes（2026-08-15 回放实测：左右两个 180° 半圆，圆心偏移 5y，非原 135° 锥），此处不再注册。
     // Poison mist fills 3 of the 4 quadrants with 90-degree cones (45-degree half-angle).
     private static readonly AOEShapeCone Mist = new(30f, 45f.Degrees());
     private static readonly AOEShapeCircle Predation = new(10f);
@@ -73,13 +70,93 @@ sealed class ManyMouthsAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
         (uint)AID.CentralWhip => new(CentralLine),
-        (uint)AID.SideWhip or (uint)AID.SideWhip2 => new(Whip),
         (uint)AID.PoisonMist or (uint)AID.PoisonMist2 or (uint)AID.PoisonMist3 or (uint)AID.PoisonMist4 => new(Mist),
         (uint)AID.Predation => new(Predation),
         (uint)AID.VenomBlob => new(Blob),
         (uint)AID.Venom => new(VenomCircle),
         _ => null
     };
+}
+
+// 侧方鞭打（2026-08-15 回放实测修正，二次修复画同侧）：实际伤害区域是左右两个 180° 半圆
+// （Cone r30 半角 90°），圆心 = helper 沿 (面向 ± 90°) 方向偏移 5y 处，扇形平分线朝外。
+// 47221 沿 面向-90°、49729 沿 面向+90°——两 helper 与 boss 视觉 47219 同毫秒 CST+ 成对施放
+// （5 次回放全部如此），按单侧分配：每个 AID 只画一侧。
+// 回放验证（2026-08-15 根因）：spell.Rotation 实际存的是"施法者→CastLocation 落点方向角"
+// （47221=-57.292°、49729=122.711°，互差 180°），即已经是 面向±90° 的结果；若再叠加 offset
+// 会把两侧算成同向（-147.292 ≡ 212.711 mod 360）→ 两半圆画到同侧。故基准改用 caster（helper）
+// 实时面向 caster.Rotation（两 helper 面向相同且稳定，与 boss 面向无关）。
+// 47221/49729 具体对应哪侧无机制意义（两侧对称打击），仅需保证两半圆分居两侧。
+sealed class SideLashes(BossModule module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeCone HalfCircle = new(30f, 90f.Degrees()); // 180° 半圆，r30
+
+    private static Angle FacingOffsetFor(uint actionID) => actionID switch
+    {
+        (uint)AID.SideWhip => -90f.Degrees(), // 一侧（AID 对应哪侧无机制意义，仅保证分居两侧）
+        (uint)AID.SideWhip2 => 90f.Degrees(), // 另一侧
+        _ => default
+    };
+
+    private sealed class Lash(uint actionID, AOEInstance aoe)
+    {
+        public readonly uint ActionID = actionID;
+        public readonly AOEInstance AOE = aoe;
+    }
+
+    private readonly List<Lash> _lashes = [with(8)];
+    private readonly List<AOEInstance> _displayed = [with(8)];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        PruneExpired();
+        _displayed.Clear();
+        foreach (var lash in _lashes)
+        {
+            _displayed.Add(lash.AOE);
+        }
+        return CollectionsMarshal.AsSpan(_displayed);
+    }
+
+    public override void Update() => PruneExpired();
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        var offset = FacingOffsetFor(spell.Action.ID);
+        if (offset == default || spell.EventHappened)
+            return;
+
+        var activation = Module.CastFinishAt(spell);
+        if (activation <= WorldState.CurrentTime)
+            return;
+
+        // 基准 = caster（helper）实时面向 caster.Rotation；圆心与扇形平分线沿 (面向 ± 90°) 方向偏移 5y 朝外。
+        // 切勿用 spell.Rotation——它存的是"施法者→落点方向角"（= 面向±90°），再叠 offset 会画到同侧（见类头注释）
+        var dir = (caster.Rotation + offset).ToDirection();
+        var origin = caster.Position + dir * 5f;
+        var aoe = new AOEInstance(HalfCircle, origin, caster.Rotation + offset, activation, risky: true, actorID: caster.InstanceID, shapeDistance: HalfCircle.Distance(origin, caster.Rotation + offset));
+        var duplicate = _lashes.FindIndex(entry => entry.ActionID == spell.Action.ID && entry.AOE.ActorID == caster.InstanceID);
+        if (duplicate >= 0)
+            _lashes[duplicate] = new(spell.Action.ID, aoe);
+        else
+            _lashes.Add(new(spell.Action.ID, aoe));
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID is not ((uint)AID.SideWhip or (uint)AID.SideWhip2))
+            return;
+
+        // 命中结算：按 施法者+动作 清除对应半圆（重复事件第二次找不到，天然幂等）
+        _lashes.RemoveAll(entry => entry.ActionID == spell.Action.ID && entry.AOE.ActorID == caster.InstanceID);
+        ++NumCasts;
+    }
+
+    private void PruneExpired()
+    {
+        var now = WorldState.CurrentTime;
+        _lashes.RemoveAll(entry => now > entry.AOE.Activation.AddSeconds(2d));
+    }
 }
 
 // Persistent venom puddles (0x4BCD) are initially created at (0, 0), then moved to their real
@@ -191,6 +268,7 @@ sealed class ManyMouthsToFeedStates : StateMachineBuilder
         TrivialPhase()
             .ActivateOnEnter<VenomBoundary>()
             .ActivateOnEnter<ManyMouthsAOEs>()
+            .ActivateOnEnter<SideLashes>()
             .ActivateOnEnter<VenomPuddles>()
             .ActivateOnEnter<VenomSpread>()
             .ActivateOnEnter<PoisonRain>();
