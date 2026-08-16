@@ -119,7 +119,8 @@ sealed class AIBehaviour(AIController ctrl, RotationModuleManager autorot, Prese
                         hints.SpinDirection = player.DirectionTo(dest).ToAngle();
                     }
                 }
-                UpdateMovement(player, master, gazeImminent || pyreticImminent, misdirectionMode ? hints.MisdirectionThreshold : default, !forbidTargeting ? hints.ActionsToExecute : null);
+                // 2026-08-16 用户要求：强制移动即将开始（伊阿姆柏预瞄末段设 ForcedMarchImminent）也并入停手停走
+                UpdateMovement(player, master, gazeImminent || pyreticImminent || hints.ForcedMarchImminent, misdirectionMode ? hints.MisdirectionThreshold : default, !forbidTargeting ? hints.ActionsToExecute : null);
             }
             finally
             {

@@ -11,7 +11,21 @@ namespace BossMod.Dawntrail.Foray.ForkedTowerMagic.Normal.FTMN4Index;
 sealed class FlareCasts(BossModule module) : Components.RaidwideCasts(module, [(uint)AID.Flare, (uint)AID.Flare2], "核爆：全屏伤害");
 
 // 封印武器·远离：本体 48384 读条 + Helper 48385 爱之歌中心 R15 圈（7.0s），玩家需离开中心 15y 之外
-sealed class SealedImplementsAway(BossModule module) : Components.SimpleAOEs(module, (uint)AID.RomeosBallad, 15f);
+sealed class SealedImplementsAway(BossModule module) : Components.SimpleAOEs(module, (uint)AID.RomeosBallad, 15f)
+{
+    // 预言时序门控（2026-08-17）：预言预警激活且本机制生效晚于预言结算+1.5s → 压制 AI 禁区（AI 先躲预言）；
+    // 机制早于/接近预言结算（爱之歌差 0.7s）→ 不压制，先躲机制。雷达（ActiveAOEs）不受影响。
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (Module.FindComponent<ProphecyMeteors>() is { } prophecy
+            && ProphecyMeteors.EarliestAOEActivation(ActiveAOEs(slot, actor)) is { } act
+            && prophecy.ShouldSuppress(act))
+        {
+            return;
+        }
+        base.AddAIHints(slot, actor, assignment, hints);
+    }
+}
 
 // 封印武器·靠近：本体 48386 读条 + Helper 48387 盯准 R11 圈（7.1s）@ 场边 R20.5
 // （常规 3 个三角位 / 元素阶段后 6 个六方位），圈内危险，玩家需靠近中心。
@@ -21,6 +35,16 @@ sealed class SealedImplementsNear(BossModule module) : Components.SimpleAOEs(mod
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         base.AddAIHints(slot, actor, assignment, hints);
+
+        // 预言时序门控（2026-08-17）：预言预警激活且本机制生效晚于预言结算+1.5s（盯准差 2.4s）→ 压制中心 goal，
+        // 不把 AI 拉进 boss 脚下（预言后进圈）；圈禁区（base）照常——场边圈该躲还是躲。
+        if (Module.FindComponent<ProphecyMeteors>() is { } prophecy
+            && ProphecyMeteors.EarliestAOEActivation(ActiveAOEs(slot, actor)) is { } act
+            && prophecy.ShouldSuppress(act))
+        {
+            return;
+        }
+
         if (ActiveAOEs(slot, actor).Length > 0)
             hints.GoalZones.Add(AIHints.GoalSingleTarget(Module.Center, 9.5f, 2f));
     }
@@ -677,6 +701,20 @@ sealed class SlashCombos(BossModule module) : ReplayValidatedCastAOEs(module)
 
     protected override AOEConfig? ConfigFor(uint actionID)
         => actionID is (uint)AID.WindSlash or (uint)AID.Iainuki ? new(Cone) : null;
+
+    // AI 禁区时序门控（2026-08-16 用户要求 + 2026-08-17 时序化）：预言预警激活且封印武器（镰鼬/居合）禁区生效
+    // 晚于预言结算+1.5s → 压制（不生成 AI 禁区，AI 先躲预言）；机制早于/接近预言结算 → 不压制（先躲机制）。
+    // 仅门控 AI 禁区（AddAIHints）——雷达绘制路径（基类 ActiveAOEs）完全不动，人工视觉照常显示。
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (Module.FindComponent<ProphecyMeteors>() is { } prophecy
+            && ProphecyMeteors.EarliestAOEActivation(ActiveAOEs(slot, actor)) is { } act
+            && prophecy.ShouldSuppress(act))
+        {
+            return;
+        }
+        base.AddAIHints(slot, actor, assignment, hints);
+    }
 }
 
 // 全知烈火/劫火分散（2026-08-12 恢复 SpreadFromIcon 实现——merge 前 7.5.5.34 实测正常）：
@@ -707,6 +745,46 @@ sealed class ProphecyMeteors(BossModule module) : ReplayValidatedCastAOEs(module
     private readonly Dictionary<ulong, ushort> _types = []; // 预言现象 InstanceID → 状态 extra
     private readonly HashSet<ulong> _previewed = []; // 已添加前置项的预言现象
     private readonly List<AOEInstance> _displayed = [with(12)]; // 合并列表（读条项 + 前置项）
+
+    // 预言前置预警是否激活（前置预警项非空）：供 SlashCombos 门控 AI 禁区使用（2026-08-16）
+    public bool PreviewActive => _preview.Count > 0;
+
+    // 预言前置预警最先生效（结算）时刻：_preview 空时 null（2026-08-17 时序门控用）
+    public DateTime? NearestSettleTime
+    {
+        get
+        {
+            if (_preview.Count == 0)
+                return null;
+            var soon = _preview[0].Activation;
+            for (var i = 1; i < _preview.Count; ++i)
+                if (_preview[i].Activation < soon)
+                    soon = _preview[i].Activation;
+            return soon;
+        }
+    }
+
+    // 时序门控（2026-08-17 用户方案 A）：预言预警激活且机制 activation 晚于预言结算 + 1.5s 安全余量 → 压制
+    // （先躲预言；机制早于或接近预言结算则不压制，先躲机制——实测案例：爱之歌差 0.7s 不压制=当场躲；
+    //  盯准差 2.4s 压制=预言后进圈）
+    public bool ShouldSuppress(DateTime mechActivation)
+    {
+        var settle = NearestSettleTime;
+        return settle != null && mechActivation > settle.Value.AddSeconds(SettleSafetyMargin);
+    }
+    private const float SettleSafetyMargin = 1.5f; // 安全余量：机制晚于预言结算 1.5s 以上才压制（2026-08-17）
+
+    // 静态辅助：取 AOE 列表最早 activation（时序门控用，2026-08-17；命名避开基类 EarliestActivation 属性）
+    public static DateTime? EarliestAOEActivation(ReadOnlySpan<AOEInstance> aoes)
+    {
+        if (aoes.Length == 0)
+            return null;
+        var soon = aoes[0].Activation;
+        for (var i = 1; i < aoes.Length; ++i)
+            if (aoes[i].Activation < soon)
+                soon = aoes[i].Activation;
+        return soon;
+    }
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {

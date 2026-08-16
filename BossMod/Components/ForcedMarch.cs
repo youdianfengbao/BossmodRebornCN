@@ -20,7 +20,10 @@ public class GenericForcedMarch(BossModule module, float activationLimit = float
     public bool OverrideDirection;
     public int NumActiveForcedMarches;
     public readonly Dictionary<ulong, PlayerState> State = []; // key = instance ID
-    public float MovementSpeed = 6f; // default movement speed, can be overridden if necessary
+    public float MovementSpeed = 6.6f; // 强制移动速度（2026-08-17 伊阿姆柏两场回放均值 ~6.6y/s，原 6f→6.4f；其他战斗若无实测可 override）
+    // 2026-08-17 复核：强制移动位移 = ToDirection(朝向)（标准 BossMod 前方，无镜像）——两场精确验证
+    // （本场 atan2(+10.459,+5.437)=62.5°=朝向 62.533°；23:18 场 atan2(+4.99,−11.93)=157.3°=朝向 157.307°）。
+    // 此前"位移=180°−朝向"镜像结论为坐标系换算错误（把 MOVE 行 BossMod 系 rotation 误当游戏网络系套公式），已回滚。
     public readonly float ActivationLimit = activationLimit; // do not show pending moves that activate later than this limit
     private const float approxHitBoxRadius = 0.499f; // calculated because due to floating point errors this does not result in 0.001
     private const float maxIntersectionError = 0.5f - approxHitBoxRadius; // calculated because due to floating point errors this does not result in 0.001
@@ -95,7 +98,7 @@ public class GenericForcedMarch(BossModule module, float activationLimit = float
             // TODO: would be nice to use non-interpolated rotation here...
             dir = player.Rotation;
             var movementDistance = MovementSpeed * (float)(state.ForcedEnd - WorldState.CurrentTime).TotalSeconds;
-            var wdir = dir.ToDirection();
+            var wdir = dir.ToDirection(); // 位移方向 = 标准前方（2026-08-17 复核无镜像）
 
             if (StopAfterWall)
             {
@@ -107,7 +110,7 @@ public class GenericForcedMarch(BossModule module, float activationLimit = float
             }
 
             var to = from + movementDistance * wdir;
-            movements.Add((from, to, dir));
+            movements.Add((from, to, dir)); // 箭头朝向 = 实际位移方向（标准前方）
             from = to;
         }
 
@@ -124,7 +127,7 @@ public class GenericForcedMarch(BossModule module, float activationLimit = float
 
             dir += move.dir;
             var movementDistance = MovementSpeed * move.duration;
-            var wdir = dir.ToDirection();
+            var wdir = dir.ToDirection(); // 位移方向 = 标准前方（2026-08-17 复核无镜像）
 
             if (StopAfterWall)
             {
@@ -136,7 +139,7 @@ public class GenericForcedMarch(BossModule module, float activationLimit = float
             }
 
             var to = from + movementDistance * wdir;
-            movements.Add((from, to, dir));
+            movements.Add((from, to, dir)); // 箭头朝向 = 实际位移方向（标准前方）
             from = to;
         }
         return movements;

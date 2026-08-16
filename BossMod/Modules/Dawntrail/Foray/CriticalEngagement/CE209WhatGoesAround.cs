@@ -108,4 +108,5 @@ sealed class WhatGoesAroundStates : StateMachineBuilder
 // The instakill boundary is a square of 21y (confirmed by in-game observation; the kill zone is
 // square, not circular, center 224,-860).
 // 2026-08-07: arena bounds set to 20f (场地 20f，用户要求：删除场边即死区域，恢复简单方形).
-public sealed class WhatGoesAround(WorldState ws, Actor primary) : BossModule(ws, primary, new(224f, -860f), new ArenaBoundsSquare(20f));
+// 2026-08-16 场地半径 -0.3f：控制 AI 走位不贴紧即死边缘（方形场地半宽 20f→19.7f，整体收缩 0.3f）.
+public sealed class WhatGoesAround(WorldState ws, Actor primary) : BossModule(ws, primary, new(224f, -860f), new ArenaBoundsSquare(19.7f));

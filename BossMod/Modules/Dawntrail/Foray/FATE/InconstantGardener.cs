@@ -27,11 +27,13 @@ public enum SID : uint {
 
 sealed class GardenersHymn(BossModule module) : Components.SimpleAOEs(module, (uint)AID.GardenersHymn, new AOEShapeCircle(5.0f));
 sealed class OdeOfTheUnderfoot(BossModule module) : Components.SimpleAOEs(module, (uint)AID.OdeOfTheUnderfoot, new AOEShapeCircle(10.0f));
-sealed class IambicMarch(BossModule module) : Components.StatusDrivenForcedMarch(module, 3.0f, (uint)SID.ForwardMarch, (uint)SID.AboutFace, (uint)default,
+sealed class IambicMarch(BossModule module) : Components.StatusDrivenForcedMarch(module, 2.0f, (uint)SID.ForwardMarch, (uint)SID.AboutFace, (uint)default,
 // The march direction follows the player's facing, so automation must pre-aim: a forward march
 // towards the boss lands inside the OdeOfTheUnderfoot circle and the seed bursts. Replay shows the
 // AI marched east into the 10y circle and ate the hit, so mark any position whose forced-march
 // destination is inside those zones as forbidden, forcing it to turn/relocate before the march.
+// 2026-08-17 重标定（两场回放 TextVerbose_2026_08_16_22_27_53 / 23_18_54）：1257 激活时长 ~1.96s（原 4.96f 误用
+// 5142 预告 buff 时长）、强制移动速度 ~6.6y/s（两场均值）→ Duration 2.0f、预测位移 6.6×2.0≈13.2y ≈ 实际 12.9y
     (uint)default, (uint)SID.ForcedMarch)
 {
     public override bool DestinationUnsafe(int slot, Actor actor, WPos pos)
@@ -63,16 +65,70 @@ sealed class IambicMarch(BossModule module) : Components.StatusDrivenForcedMarch
         if (movements.Count == 0)
             return;
 
-        // The march destination depends on facing. A forbidden circle at the current position only
-        // makes the pathfinder move somewhere else while it keeps facing the boss. Score candidate
-        // destinations by the facing they create, so movement itself pre-aims the upcoming march.
         if (State.TryGetValue(actor.InstanceID, out var state) && state.ForcedEnd <= WorldState.CurrentTime && state.PendingMoves.Count != 0)
         {
+            // 预瞄期（2026-08-16 方案 A：原地转向修复）：当前位置安全且有安全朝向 S 时，
+            // 用 DesiredFacing 令 AI 原地转向到 S（零移动），不再用 GoalZone 追逐目标点——
+            // 消除回放实测的目标点追逐环（5 秒挪 8.4y + 朝向来回摆动）。
+            // 仅当无安全朝向或当前位置不安全时才退回原移动方案（该移动还是要移动）。
+            if (TryFindSafeFacing(slot, actor, state, out var safeFacing))
+            {
+                hints.DesiredFacing = safeFacing;
+                hints.DesiredFacingExpire = WorldState.FutureTime(0.5d); // 每帧刷新，消费端（ActionManagerEx）按过期时间判断，防残留
+
+                // 生效前 0.5s 停手停走（2026-08-16 用户要求）：强制移动即将开始（5142/5143 ExpireAt ≤ now+0.5s）时
+                // 打断读条并停走，避免在移动中途被打断。ForceCancelCast → ActionManagerEx.CancelCast；
+                // ForcedMarchImminent → AIBehaviour.UpdateMovement 停走（NaviTargetPos=null），
+                // IPC Hints.ForceCancelCastAI 同步 AE 停手（链路确认：IPCProvider:180）
+                if (state.PendingMoves[0].activation <= WorldState.FutureTime(0.5d))
+                {
+                    hints.ForceCancelCast = true;
+                    hints.ForcedMarchImminent = true;
+                }
+                return;
+            }
+
+            // The march destination depends on facing. A forbidden circle at the current position only
+            // makes the pathfinder move somewhere else while it keeps facing the boss. Score candidate
+            // destinations by the facing they create, so movement itself pre-aims the upcoming march.
             hints.GoalZones.Add(position => CandidateMarchSafe(slot, actor, position, state) ? 20f : 0f);
         }
 
         if (DestinationUnsafe(slot, actor, movements[^1].to))
             hints.AddForbiddenZone(new SDCircle(actor.Position, 1.5f), WorldState.FutureTime(10d));
+    }
+
+    // 从当前朝向开始每 5° 扫描，找最近的"落点安全"朝向（复用 CandidateMarchSafe 的落点判定：
+    // 沿该朝向累加 PendingMoves 位移后不进 Ode 10y/Burst 15y 圈）。当前位置不安全 → 直接 false（需移动，不提供原地转向）
+    private bool TryFindSafeFacing(int slot, Actor actor, PlayerState state, out Angle safeFacing)
+    {
+        safeFacing = default;
+        if (DestinationUnsafe(slot, actor, actor.Position))
+            return false;
+
+        var start = actor.Rotation;
+        for (var i = 0; i < 72; ++i) // 360° / 5° = 72 步
+        {
+            var candidate = start + i * 5f.Degrees();
+            if (IsFacingSafe(slot, actor, state, candidate))
+            {
+                safeFacing = candidate;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private bool IsFacingSafe(int slot, Actor actor, PlayerState state, Angle facing)
+    {
+        var destination = actor.Position;
+        var direction = facing;
+        foreach (var move in state.PendingMoves)
+        {
+            direction += move.dir;
+            destination += MovementSpeed * move.duration * direction.ToDirection(); // 位移方向 = 标准前方（2026-08-17 复核无镜像）
+        }
+        return !DestinationUnsafe(slot, actor, destination);
     }
 
     private bool CandidateMarchSafe(int slot, Actor actor, WPos position, PlayerState state)
@@ -83,7 +139,7 @@ sealed class IambicMarch(BossModule module) : Components.StatusDrivenForcedMarch
         foreach (var move in state.PendingMoves)
         {
             direction += move.dir;
-            destination += MovementSpeed * move.duration * direction.ToDirection();
+            destination += MovementSpeed * move.duration * direction.ToDirection(); // 位移方向 = 标准前方（2026-08-17 复核无镜像）
         }
         return !DestinationUnsafe(slot, actor, destination);
     }

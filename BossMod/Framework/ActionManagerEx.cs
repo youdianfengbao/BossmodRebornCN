@@ -444,8 +444,20 @@ public sealed unsafe class ActionManagerEx : IDisposable
         var idealOrientation = currentAction ? _smartRotationTweak.GetSpellOrientation(GetSpellIdForAction(currentAction), new(player->Position.X, player->Position.Z), currentTargetSelf, currentTargetPos, currentTargetLoc) : null;
         var avoidGaze = _smartRotationTweak.GetSafeRotation(current, idealOrientation, isCasting ? 75.Degrees() : 45.Degrees());
 
+        // 组件期望朝向（DesiredFacing，2026-08-16 方案 A）：驱动原地转向（如强制移动预瞄），
+        // gaze 规避（avoidGaze）优先保命，其次 DesiredFacing，最后 restore。
+        // idealOrientation 为 null（预瞄期 AI 未施法）时走本通道；DesiredFacingExpire 过期后自动失效。
+        if (avoidGaze != null)
+        {
+            return avoidGaze;
+        }
+        if (_hints.DesiredFacing is { } desired && _hints.DesiredFacingExpire > _ws.CurrentTime)
+        {
+            return desired;
+        }
+
         // avoiding a gaze has a priority over restore
-        return avoidGaze ?? restored;
+        return restored;
     }
 
     private void UpdateDetour(ActionManager* self)

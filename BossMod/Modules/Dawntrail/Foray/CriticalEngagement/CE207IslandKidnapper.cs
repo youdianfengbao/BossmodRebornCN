@@ -141,18 +141,30 @@ sealed class KidnapperAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 }
 
 // 冰花: emitter 的 B953 cast 事件偶发缺失 (ARR 第 4 波无 cast), 依赖 cast 会漏画。
-// 改为直接从存活 emitter 实时画 13y 圈, 不依赖 cast 事件。
+// 直接从存活 emitter 实时画 13y 圈, 不依赖 cast 事件；但补真实 activation——
+// 2026-08-17 CE207 三案例修复：无 activation（DateTime.MinValue）被 RasterizeForbiddenZones 判 g=0
+// （"立即结算"最紧迫禁区），叠加 ThetaStar 时间窗对 g=0 格全封 → AI 禁区内逃逸被禁（站桩/双杀/圆内拉扯）。
+// 监听 emitter 的 WindBloom(0xB953) 读条，AOEInstance 带 CastFinishAt；读条缺失的 emitter 用默认（立即）。
 sealed class WindBloomAOEs(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeCircle Shape = new(13f);
+    private readonly Dictionary<ulong, DateTime> _activation = []; // emitter InstanceID → 冰花读条结束时刻
     private readonly List<AOEInstance> _displayed = [with(8)];
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.WindBloom && caster.OID == (uint)OID.Emitter)
+        {
+            _activation[caster.InstanceID] = Module.CastFinishAt(spell); // 覆盖旧值：同 emitter 多轮读条取最新
+        }
+    }
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         _displayed.Clear();
         foreach (var emitter in Module.Enemies((uint)OID.Emitter))
             if (!emitter.IsDeadOrDestroyed)
-                _displayed.Add(new(Shape, emitter.Position, color: Colors.Danger, actorID: emitter.InstanceID,
+                _displayed.Add(new(Shape, emitter.Position, activation: _activation.GetValueOrDefault(emitter.InstanceID), color: Colors.Danger, actorID: emitter.InstanceID,
                     shapeDistance: Shape.Distance(emitter.Position, default)));
         return CollectionsMarshal.AsSpan(_displayed);
     }

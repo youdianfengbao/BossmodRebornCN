@@ -26,16 +26,17 @@ public enum AID : uint
     HorizontalRule = 0xB8CA, // helper->location, range 50 width 12 rect
     SummonPages = 0xB8CB, // helper->location, page summon visual
 
+    KnowledgeLevel3FlareWide = 0xB8CD, // helper->self, range 25 180-degree cone（推测 = 知见3级即死 180° 宽版：helper 段 47308-47310 呈"5级宽/空位/4级宽"结构，质数宽在独立段 49879/50561，排除后空位指向 3级宽；page 段推测 47316 相印证。2026-08-16 推测记录，未接线——待回放实测确认后再挂 KnowledgeSectors.ConfigFor（Level3Wide → Sector180））
     KnowledgeLevel4HolyWide = 0xB8CE, // helper->self, range 25 180-degree cone
     KnowledgeLevel5Death = 0xB8CF, // helper->self, range 25 120-degree cone
     KnowledgeLevel5DeathBook = 0xB8CC, // two-book round: the 5级 sector is cast with this page-side AID (47308) instead of B8CF
     KnowledgeLevel3Flare = 0xB8D0, // helper->self, range 25 120-degree cone
     KnowledgeLevel4Holy = 0xB8D1, // helper->self, range 25 120-degree cone
     PrimeKnowledgeLevelDeath = 0xB8D2, // helper->self, range 25 120-degree cone
-    PageLevel5Visual = 0xB8D3, // page->self, visual
-    PageLevel3Visual = 0xB8D4, // page->self, visual
-    PageLevel4Visual = 0xB8D5, // page->self, visual
-    PagePrimeVisual = 0xB8D6, // page->self, visual
+    PageLevel5Visual = 0xB8D3, // page->self, visual（实测 180° 轮 page 读条，2026-08-16 回放；对应 helper 47308/50554）
+    PageLevel3Visual = 0xB8D4, // page->self, visual（推测 = 3级核爆 180° 宽版 visual：page 段 47315-47318 按 5/3/4/质数 序列与 120° 段 47311-47314 同序推断，待回放验证）
+    PageLevel4Visual = 0xB8D5, // page->self, visual（推测 = 4级核爆 180° 宽版 visual：同上序列推断，待回放验证）
+    PagePrimeVisual = 0xB8D6, // page->self, visual（实测 180° 轮 page 读条，2026-08-16 回放；对应 helper 49879/50561）
     BookDropVisual = 0xB8D7, // boss->self, visual
     BookDrop = 0xB8DA, // book trap->self, 8.0s cast, range 3 circle
     ThunderII = 0xB8DC, // helper->self, 4.0s cast, range 50 width 5 rect
@@ -50,6 +51,7 @@ public enum AID : uint
     UnboundInk = 0xC154, // boss->self, 4.0s cast, range 9 circle
     PrimeKnowledgeLevelDeathWide = 0xC2D7, // helper->self, range 25 180-degree cone
 
+    KnowledgeLevel3FlareWideAlt = 0xC57B, // helper->self, duplicate of B8CD（推测 = 知见3级即死 180° 宽版，50555；2026-08-16 推测记录，未接线——待回放实测确认后再挂 KnowledgeSectors.ConfigFor）
     KnowledgeLevel4HolyWideAlt = 0xC57C, // helper->self, duplicate of B8CE
     KnowledgeLevel5DeathAlt = 0xC57D, // helper->self, duplicate of B8CF
     KnowledgeLevel5DeathBookAlt = 0xC57A, // two-book round: duplicate of B8CC (50554)

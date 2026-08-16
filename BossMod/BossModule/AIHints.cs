@@ -142,6 +142,16 @@ public sealed class AIHints
     // AI will rotate to face allowed orientation at last possible moment, potentially losing uptime
     public readonly List<(Angle center, Angle halfWidth, DateTime activation)> ForbiddenDirections = [];
 
+    // 组件期望朝向（2026-08-16 方案 A）：驱动"原地转向"（如强制移动预瞄，AI 原地转向到安全朝向、不移动），
+    // 与 gaze 规避（ForbiddenDirections）通道并行——ActionManagerEx 消费时 gaze 优先（保命），其次本字段。
+    // 带过期时间：组件只需在预瞄期每帧写入，消费端按 DesiredFacingExpire 判断生效，避免跨帧残留。
+    public Angle? DesiredFacing;
+    public DateTime DesiredFacingExpire;
+
+    // AI 强制移动即将开始（预瞄末段，2026-08-16 用户要求停手停走）：AIBehaviour 参照 gazeImminent 停走
+    // （NaviTargetPos=null + ForceCancelCast），组件配合设置 hints.ForceCancelCast 打断读条
+    public bool ForcedMarchImminent;
+
     // closest special movement/targeting/action mode, if any
     // activation = when the restriction starts (e.g. bomb detonation), finish = when the restriction ends (e.g. pyretic expires)
     public (SpecialMode mode, DateTime activation, DateTime finish) ImminentSpecialMode;
@@ -192,6 +202,9 @@ public sealed class AIHints
         Teleporters.Clear();
         RecommendedPositional = default;
         ForbiddenDirections.Clear();
+        DesiredFacing = null;
+        DesiredFacingExpire = default;
+        ForcedMarchImminent = false;
         ImminentSpecialMode = default;
         MisdirectionThreshold = 15f.Degrees();
         PredictedDamage.Clear();
