@@ -26,7 +26,7 @@ public enum AID : uint
     HorizontalRule = 0xB8CA, // helper->location, range 50 width 12 rect
     SummonPages = 0xB8CB, // helper->location, page summon visual
 
-    KnowledgeLevel3FlareWide = 0xB8CD, // helper->self, range 25 180-degree cone（推测 = 知见3级即死 180° 宽版：helper 段 47308-47310 呈"5级宽/空位/4级宽"结构，质数宽在独立段 49879/50561，排除后空位指向 3级宽；page 段推测 47316 相印证。2026-08-16 推测记录，未接线——待回放实测确认后再挂 KnowledgeSectors.ConfigFor（Level3Wide → Sector180））
+    KnowledgeLevel3FlareWide = 0xB8CD, // helper->self, range 25 180-degree cone（已实测确认 2026-08-18：helper 233C 施放 47309 "知见3级核爆" 3级宽版，与 page 4BD5 的 47316 同步；已接 KnowledgeSectors.ConfigFor → Level3Wide/Sector180）
     KnowledgeLevel4HolyWide = 0xB8CE, // helper->self, range 25 180-degree cone
     KnowledgeLevel5Death = 0xB8CF, // helper->self, range 25 120-degree cone
     KnowledgeLevel5DeathBook = 0xB8CC, // two-book round: the 5级 sector is cast with this page-side AID (47308) instead of B8CF
@@ -34,8 +34,8 @@ public enum AID : uint
     KnowledgeLevel4Holy = 0xB8D1, // helper->self, range 25 120-degree cone
     PrimeKnowledgeLevelDeath = 0xB8D2, // helper->self, range 25 120-degree cone
     PageLevel5Visual = 0xB8D3, // page->self, visual（实测 180° 轮 page 读条，2026-08-16 回放；对应 helper 47308/50554）
-    PageLevel3Visual = 0xB8D4, // page->self, visual（推测 = 3级核爆 180° 宽版 visual：page 段 47315-47318 按 5/3/4/质数 序列与 120° 段 47311-47314 同序推断，待回放验证）
-    PageLevel4Visual = 0xB8D5, // page->self, visual（推测 = 4级核爆 180° 宽版 visual：同上序列推断，待回放验证）
+    PageLevel3Visual = 0xB8D4, // page->self, visual（已实测确认 2026-08-18：page 4BD5 施放 47316 "知见3级核爆" 3级宽版 visual，与 helper 233C 的 47309/50555 同步；已接 KnowledgeSectors.ConfigFor → Level3Wide/Sector180）
+    PageLevel4Visual = 0xB8D5, // page->self, visual（已实测确认 2026-08-18：page 4BD6 施放 47317 "知见4级神圣" 4级宽版 visual，与 helper 233C 的 47310/50556 同步；已接 KnowledgeSectors.ConfigFor → Level4Wide/Sector180）
     PagePrimeVisual = 0xB8D6, // page->self, visual（实测 180° 轮 page 读条，2026-08-16 回放；对应 helper 49879/50561）
     BookDropVisual = 0xB8D7, // boss->self, visual
     BookDrop = 0xB8DA, // book trap->self, 8.0s cast, range 3 circle
@@ -51,7 +51,7 @@ public enum AID : uint
     UnboundInk = 0xC154, // boss->self, 4.0s cast, range 9 circle
     PrimeKnowledgeLevelDeathWide = 0xC2D7, // helper->self, range 25 180-degree cone
 
-    KnowledgeLevel3FlareWideAlt = 0xC57B, // helper->self, duplicate of B8CD（推测 = 知见3级即死 180° 宽版，50555；2026-08-16 推测记录，未接线——待回放实测确认后再挂 KnowledgeSectors.ConfigFor）
+    KnowledgeLevel3FlareWideAlt = 0xC57B, // helper->self, duplicate of B8CD（已实测确认 2026-08-18：50555 即 3级宽版，与 47309 同源同步；已接 KnowledgeSectors.ConfigFor → Level3Wide/Sector180）
     KnowledgeLevel4HolyWideAlt = 0xC57C, // helper->self, duplicate of B8CE
     KnowledgeLevel5DeathAlt = 0xC57D, // helper->self, duplicate of B8CF
     KnowledgeLevel5DeathBookAlt = 0xC57A, // two-book round: duplicate of B8CC (50554)
@@ -381,7 +381,7 @@ sealed class HorizontalRule(BossModule module) : Components.GenericAOEs(module)
 // ActiveAOEs calculation; globally painting every sector red is mechanically wrong.
 sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module)
 {
-    private enum SectorKind { Level3, Level4, Level4Wide, Level5, Prime, PrimeWide }
+    private enum SectorKind { Level3, Level3Wide, Level4, Level4Wide, Level5, Prime, PrimeWide }
     private readonly record struct SectorConfig(SectorKind Kind, AOEShape Shape, OID PageOID);
 
     private sealed class PendingSector(SectorKind kind, AOEShape shape, Angle rotation, DateTime activation, ulong casterID)
@@ -489,8 +489,9 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
     private static SectorConfig? ConfigFor(uint actionID) => actionID switch
     {
         (uint)AID.KnowledgeLevel3Flare or (uint)AID.KnowledgeLevel3FlareAlt => new(SectorKind.Level3, Sector120, OID.Pages16),
+        (uint)AID.KnowledgeLevel3FlareWide or (uint)AID.KnowledgeLevel3FlareWideAlt or (uint)AID.PageLevel3Visual => new(SectorKind.Level3Wide, Sector180, OID.Pages16),
         (uint)AID.KnowledgeLevel4Holy or (uint)AID.KnowledgeLevel4HolyAlt => new(SectorKind.Level4, Sector120, OID.Pages8),
-        (uint)AID.KnowledgeLevel4HolyWide or (uint)AID.KnowledgeLevel4HolyWideAlt => new(SectorKind.Level4Wide, Sector180, OID.Pages8),
+        (uint)AID.KnowledgeLevel4HolyWide or (uint)AID.KnowledgeLevel4HolyWideAlt or (uint)AID.PageLevel4Visual => new(SectorKind.Level4Wide, Sector180, OID.Pages8),
         (uint)AID.KnowledgeLevel5Death or (uint)AID.KnowledgeLevel5DeathAlt => new(SectorKind.Level5, Sector120, OID.Pages64),
         // The two-book rounds cast the 5级 sector with the page-side AIDs B8CC/50554 instead of
         // B8CF/C57D, and each book covers a full 180-degree sector (not the 120 used by the
@@ -516,7 +517,7 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
     // level satisfied. The sector is therefore SAFE only when the condition does NOT hold.
     private static bool SatisfiesRule(int level, SectorKind kind) => kind switch
     {
-        SectorKind.Level3 => level % 3 != 0,
+        SectorKind.Level3 or SectorKind.Level3Wide => level % 3 != 0,
         SectorKind.Level4 or SectorKind.Level4Wide => level % 4 != 0,
         SectorKind.Level5 => level % 5 != 0,
         SectorKind.Prime or SectorKind.PrimeWide => !IsPrime(level),
@@ -555,7 +556,7 @@ sealed class KnowledgeSectors(BossModule module) : Components.GenericAOEs(module
 // stand in (victims cluster inside each 3y book). Draw Unbound Ink as a red circle and BookDrop
 // as a tower.
 sealed class UnboundInk(BossModule module) : Components.SimpleAOEs(module, (uint)AID.UnboundInk, new AOEShapeCircle(9f));
-sealed class BookDropTower(BossModule module) : Components.CastTowers(module, (uint)AID.BookDrop, 3f, 1, 2);
+sealed class BookDropTower(BossModule module) : Components.CastTowersOpenWorld(module, (uint)AID.BookDrop, 3f, 3, 3); // CE is open world: other participants aren't in the party, so use the OpenWorld towers (counts world players, not party slots); needs 3 soakers (2 is not enough)
 
 // The three B8DF helpers carry duplicate damage packets; the boss cast is the stable warning.
 sealed class Marginalia(BossModule module) : Components.RaidwideCast(module, (uint)AID.Marginalia);

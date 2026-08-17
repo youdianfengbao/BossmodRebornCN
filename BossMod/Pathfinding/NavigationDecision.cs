@@ -31,6 +31,12 @@ public struct NavigationDecision
 
     public const float ActivationTimeCushion = 1f; // reduce time between now and activation by this value in seconds; increase for more conservativeness
 
+    // 方案2：目标圈被禁区大面积覆盖时放弃该目标圈的阈值。
+    // 若某目标圈的"安全格数 / 圈内总格数"低于此值，说明该目标圈绝大部分面积在禁区内，
+    // 继续以其为寻路目标会把目的地选在禁区边界最近的安全格，且禁区栅格随倒计时逐帧变化导致目的地跳动（移动抽搐），
+    // 此时本轮整圈跳过不写入 PixelPriority（等价于放弃该目标，只求存活）。圈内总格数为 0 时不视为放弃。
+    private const float MinSafeGoalFraction = 0.25f;
+
     public static NavigationDecision Build(Context ctx, DateTime currentTime, AIHints hints, Actor player, float playerSpeed = 6f, float forbiddenZoneCushion = default)
     {
         var startTime = Stopwatch.GetTimestamp();
@@ -449,10 +455,20 @@ public struct NavigationDecision
         var pixelMaxG = map.PixelMaxG;
         var pixelPriority = map.PixelPriority;
 
-        Parallel.ForEach(rangePartitioner, static () => float.MinValue, (range, loopState, localMax) =>
+        // 方案2：目标圈被禁区大面积覆盖时放弃该目标圈。
+        // 在现有栅格化循环内顺便统计每个目标圈的"圈内总格数"与"圈内安全格数"（不新增全图扫描），
+        // 若某目标圈安全格占比过低（绝大部分面积在禁区内），继续以其为寻路目标会把目的地选在禁区边界
+        // 最近的安全格，且禁区栅格随倒计时逐帧变化，导致目的地跳动（移动抽搐），故本轮整圈放弃该目标圈。
+        var totalCounts = new int[len];
+        var safeCounts = new int[len];
+
+        Parallel.ForEach(rangePartitioner, () => (LocalMax: float.MinValue, Total: new int[len], Safe: new int[len]), (range, loopState, acc) =>
             {
                 var ys = range.Item1;
                 var ye = range.Item2;
+                var localTotal = acc.Total;
+                var localSafe = acc.Safe;
+                var localMax = acc.LocalMax;
 
                 var rows = Math.Max(0, Math.Min(ye, height) - ys);
                 var scratchRows = rows + 1; // extra row for bottom corners
@@ -493,7 +509,7 @@ public struct NavigationDecision
                         }
                     }
 
-                    // produce final cell priorities
+                    // produce final cell priorities; 同时在现有循环内顺便统计每个目标圈的覆盖格数与安全格数
                     for (var y = ys; y < ye; ++y)
                     {
                         var rowBase = (y - ys) * width;
@@ -515,27 +531,146 @@ public struct NavigationDecision
                             {
                                 localMax = cellP;
                             }
+
+                            // 统计：该格是否被各目标圈覆盖（用格中心近似判定），以及该格是否安全（未被禁区覆盖）
+                            var cellCenter = topLeft + (y + 0.5f) * dy + (x + 0.5f) * dx;
+                            var isSafe = pixelMaxG[idx] == float.MaxValue;
+                            for (var i = 0; i < len; ++i)
+                            {
+                                if (goals[i](cellCenter) > 0f)
+                                {
+                                    ++localTotal[i];
+                                    if (isSafe)
+                                    {
+                                        ++localSafe[i];
+                                    }
+                                }
+                            }
                         }
                     }
-                    return localMax;
+                    return (localMax, localTotal, localSafe);
                 }
                 finally
                 {
                     ArrayPool<float>.Shared.Return(localScratch, clearArray: false);
                 }
             },
-            localMax =>
+            acc =>
             {
+                // 合并各分区的局部统计与局部最大值
+                for (var i = 0; i < len; ++i)
+                {
+                    totalCounts[i] += acc.Total[i];
+                    safeCounts[i] += acc.Safe[i];
+                }
                 float initVal, newVal;
                 do
                 {
                     initVal = globalMaxPriority;
-                    newVal = Math.Max(initVal, localMax);
+                    newVal = Math.Max(initVal, acc.LocalMax);
                 }
                 while (initVal != Interlocked.CompareExchange(ref globalMaxPriority, newVal, initVal));
             });
 
         map.MaxPriority = globalMaxPriority;
+
+        // 判定被放弃的目标圈：圈内总格数 > 0 且安全格占比低于阈值。
+        // 圈内总格数为 0（无格子可统计，如目标圈完全在地图外）时不视为放弃，维持原行为。
+        var abandoned = new bool[len];
+        var anyAbandoned = false;
+        for (var i = 0; i < len; ++i)
+        {
+            if (totalCounts[i] > 0 && safeCounts[i] < totalCounts[i] * MinSafeGoalFraction)
+            {
+                abandoned[i] = true;
+                anyAbandoned = true;
+            }
+        }
+
+        if (!anyAbandoned)
+        {
+            return;
+        }
+
+        // 修正：把被放弃目标圈覆盖的安全格优先级重算（跳过被放弃目标圈的贡献），并同步更新全局最大优先级
+        var newGlobalMax = float.MinValue;
+        Parallel.ForEach(rangePartitioner, () => float.MinValue, (range, loopState, localMax) =>
+            {
+                var ys = range.Item1;
+                var ye = range.Item2;
+
+                for (var y = ys; y < ye; ++y)
+                {
+                    var idx = y * width;
+                    for (var x = 0; x < width; ++x, ++idx)
+                    {
+                        if (pixelMaxG[idx] != float.MaxValue)
+                        {
+                            continue; // 危险格保持原样（优先级为 0，不影响全局最大值）
+                        }
+
+                        var cellCenter = topLeft + (y + 0.5f) * dy + (x + 0.5f) * dx;
+                        var coveredByAbandoned = false;
+                        for (var i = 0; i < len; ++i)
+                        {
+                            if (abandoned[i] && goals[i](cellCenter) > 0f)
+                            {
+                                coveredByAbandoned = true;
+                                break;
+                            }
+                        }
+
+                        float cellP;
+                        if (coveredByAbandoned)
+                        {
+                            // 重算该格优先级：4 角求值（跳过被放弃目标圈）
+                            var tl = topLeft + y * dy + x * dx;
+                            var tr = tl + dx;
+                            var bl = tl + dy;
+                            var br = bl + dx;
+                            var tlP = 0f;
+                            var trP = 0f;
+                            var blP = 0f;
+                            var brP = 0f;
+                            for (var i = 0; i < len; ++i)
+                            {
+                                if (abandoned[i])
+                                {
+                                    continue;
+                                }
+                                tlP += goals[i](tl);
+                                trP += goals[i](tr);
+                                blP += goals[i](bl);
+                                brP += goals[i](br);
+                            }
+                            cellP = Math.Min(Math.Min(tlP, trP), Math.Min(blP, brP));
+                            pixelPriority[idx] = cellP;
+                        }
+                        else
+                        {
+                            cellP = pixelPriority[idx];
+                        }
+
+                        if (cellP > localMax)
+                        {
+                            localMax = cellP;
+                        }
+                    }
+                }
+                return localMax;
+            },
+            localMax =>
+            {
+                float initVal, newVal;
+                do
+                {
+                    initVal = newGlobalMax;
+                    newVal = Math.Max(initVal, localMax);
+                }
+                while (initVal != Interlocked.CompareExchange(ref newGlobalMax, newVal, initVal));
+            });
+
+        map.MaxPriority = newGlobalMax;
     }
 
     public static void RasterizeVoidzones(Map map, ShapeDistance[] zones)

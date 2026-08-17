@@ -532,6 +532,11 @@ sealed class Turn(BossModule module) : Components.GenericAOEs(module, warningTex
             return;
         }
 
+        // 同剑新读条开始时清除旧状态（2026-08-17 修复：同剑连续读条时旧的 _flying 残留会按 ActorID
+        // 一刀切误删新危险区——剑已到旧落点才触发新读条，旧刀必已失效，先清再入列）
+        _flying.RemoveAll(f => f.ActorID == caster.InstanceID);
+        _aoes.RemoveAll(a => a.ActorID == caster.InstanceID);
+
         // 起始角 = 从中心指向剑位置方向；顺=顺时针（BossMod 角递减）→ 弧中心=起点-半角、逆 → 起点+半角
         var start = Angle.FromDirection(caster.Position - Center);
         var rot = p.cw ? start - (p.angle / 2f).Degrees() : start + (p.angle / 2f).Degrees();

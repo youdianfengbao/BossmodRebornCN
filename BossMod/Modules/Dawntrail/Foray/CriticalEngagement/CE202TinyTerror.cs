@@ -253,11 +253,25 @@ sealed class Comet(BossModule module) : BossComponent(module) {
             return;
         }
 
+        // force the AI to focus the green-circled comet; keep Priority so it stays in PriorityTargets,
+        // and if several comets are tied, pick the one closest to the player
+        Actor? forcedTarget = null;
+        var forcedDistSq = float.MaxValue;
         foreach (var target in hints.PotentialTargets) {
             if (target.Actor.OID == (uint)OID.ArcaneSphereSmall
                 && comets.GetValueOrDefault(target.Actor.InstanceID)?.Tethers == maxTethers) {
                 target.Priority = 2;
+
+                var distSq = (target.Actor.Position - actor.Position).LengthSq();
+                if (distSq < forcedDistSq) {
+                    forcedDistSq = distSq;
+                    forcedTarget = target.Actor;
+                }
             }
+        }
+
+        if (forcedTarget != null) {
+            hints.ForcedTarget = forcedTarget;
         }
     }
 
@@ -493,6 +507,8 @@ sealed class FlareGrowable(BossModule module) : Components.GenericAOEs(module) {
 }
 
 sealed class HolyGrowable(BossModule module) : Components.GenericKnockback(module) {
+    // delay the knockback forbidden zone & goal hint until 4s before activation to avoid long-range suppression
+    private const float KnockbackHintLeadTime = 4f;
     private readonly List<Actor> mages = TinyMageMechanic.ExistingMages(module);
     private Actor? orb;
     private WPos? start;
@@ -562,6 +578,10 @@ sealed class HolyGrowable(BossModule module) : Components.GenericKnockback(modul
         var knockbacks = ActiveKnockbacks(slot, actor);
         if (knockbacks.Length != 0) {
             ref readonly var knockback = ref knockbacks[0];
+            // 仅当击退临近结算（<= 4 秒）时才给 AI 生成禁区与引导，避免球出生后约 12 秒的远期预判压制全场目标区
+            if (knockback.Activation - WorldState.CurrentTime > TimeSpan.FromSeconds(KnockbackHintLeadTime)) {
+                return;
+            }
             var sd = new SDKnockbackInCircleAwayFromOrigin(Arena.Center, knockback.Origin, knockback.Distance, 19f);
             hints.AddForbiddenZone(sd, knockback.Activation);
             // 引导 AI 到安全位置: 被 15y 击退后落点仍在 19y 电网内, 落点越靠中心分越高。
