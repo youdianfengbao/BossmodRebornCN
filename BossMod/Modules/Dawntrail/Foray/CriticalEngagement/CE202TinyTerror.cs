@@ -508,7 +508,7 @@ sealed class FlareGrowable(BossModule module) : Components.GenericAOEs(module) {
 
 sealed class HolyGrowable(BossModule module) : Components.GenericKnockback(module) {
     // delay the knockback forbidden zone & goal hint until 4s before activation to avoid long-range suppression
-    private const float KnockbackHintLeadTime = 4f;
+    internal const float KnockbackHintLeadTime = 4f;
     private readonly List<Actor> mages = TinyMageMechanic.ExistingMages(module);
     private Actor? orb;
     private WPos? start;
@@ -946,6 +946,11 @@ sealed class HolyCombo(BossModule module) : Components.GenericKnockback(module) 
         var knockbacks = ActiveKnockbacks(slot, actor);
         if (knockbacks.Length != 0) {
             ref readonly var knockback = ref knockbacks[0];
+            // 与 HolyGrowable 对齐的 4s 门控：远期击退预判提前 ~12s 进 AI 视野会长期压制目标区/触发逃逸
+            // （2026-08-19 实测 08:34:41 波玩家手动读条被 AI 逃逸移动打断 8 次）
+            if (knockback.Activation - WorldState.CurrentTime > TimeSpan.FromSeconds(HolyGrowable.KnockbackHintLeadTime)) {
+                return;
+            }
             // The forbidden zone covers landing outside the 19f safe circle (as before) and also
             // landing inside any flare pair that resolves AFTER this holy knockback: without the
             // latter, the AI picks a spot "safe for the knockback" that is knocked straight into
