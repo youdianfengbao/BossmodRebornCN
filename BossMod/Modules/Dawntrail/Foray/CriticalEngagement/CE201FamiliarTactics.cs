@@ -46,11 +46,10 @@ sealed class SpinningSweep(BossModule module) : Components.SimpleAOEs(module, (u
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        // Force maximum urgency: activation pinned to now (AI treats the cone as already active
-        // and leaves immediately); the display keeps the real cast-finish activation.
-        var now = WorldState.CurrentTime;
+        // Use cast-finish activation so urgency decays correctly over time and AncientAero (47540)
+        // is not incorrectly overridden by a zero-urgency cone.
         foreach (var aoe in ActiveAOEs(slot, actor))
-            hints.AddForbiddenZone(aoe.Shape, aoe.Origin, aoe.Rotation, now);
+            hints.AddForbiddenZone(aoe.Shape, aoe.Origin, aoe.Rotation, aoe.Activation);
     }
 }
 
@@ -60,12 +59,30 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
 {
     private static readonly AOEShapeCircle Shape = new(4f);
     private static readonly AOEShapeCircle AIShape = new(5.5f);
-    // 2026-08-05 aggressive test (NOT part of the release): normal lead 12y; when the blade is
-    // within 8y of the player, the capsule extends to 40y ahead (both half-width 4.5f - blade
-    // body r4, 8y wide, +0.5y margin each side); the 5.5y AI body circle stays unchanged.
-    private const float PredictionLength = 12f;
+    private const float BladeSpeed = 2.9f; // y/s
+    private const float ArenaRadius = 28.2f; // 场地边界 (R29.5 - blade r1.25 ≈ 28.2)
+    private static readonly WPos ArenaCenter = new(-390f, 700f);
+    private const double SampleDuration = 1.5; // 采样队列保留时长
+    private const double DirectionUpdateInterval = 1.0; // 方向刷新间隔（秒）
+    private const double PredictionDuration = 30.0; // 最大预测时长（长档）
+    private const double SegmentDuration = 5.0; // 每段时长（5s）
+    private const double MinTotalLength = 1.0; // 最小总长度阈值
+
     private readonly List<Actor> _blades = module.Enemies((uint)OID.AlabasterBlade);
     private readonly List<AOEInstance> _active = [with(8)];
+
+    // 新增状态字段
+    private DateTime? _predictedEnd; // 47530 cast完成时设为当前时间+30s
+    private bool _settlementStarted; // 47533 cast started时设true
+    private readonly Dictionary<ulong, BladeTrack> _bladeTracks = []; // key=InstanceID
+
+    // 单个弹球盘的跟踪状态
+    private sealed class BladeTrack
+    {
+        public readonly List<(DateTime Time, WPos Position)> SampleQueue = []; // 位置采样队列
+        public Angle? LockedDir; // 锁定的方向
+        public DateTime LastDirUpdate; // 上次方向更新时刻
+    }
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
@@ -75,29 +92,235 @@ sealed class UnbowedSpirit(BossModule module) : Components.GenericAOEs(module)
         return CollectionsMarshal.AsSpan(_active);
     }
 
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        // 47533 cast started 时设 _settlementStarted = true，清空所有盘的段状态
+        if (spell.Action.ID == (uint)AID.InspiritedCrosswindsVisual)
+        {
+            _settlementStarted = true;
+            // 清空所有盘的段状态（锁定方向和预测段）
+            foreach (var track in _bladeTracks.Values)
+            {
+                track.LockedDir = null;
+                // 不重置冷却，让它们自然结束
+            }
+        }
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        // 47530 cast 完成时设 _predictedEnd
+        if (spell.Action.ID == (uint)AID.UnbowedSpiritVisual)
+        {
+            _predictedEnd = WorldState.CurrentTime.AddSeconds(PredictionDuration);
+            _settlementStarted = false; // 新批次开始，重置结算标志
+            // 清空旧的盘状态字典
+            _bladeTracks.Clear();
+        }
+    }
+
+    public override void Update()
+    {
+        // 每帧采样当前位置入队
+        var now = WorldState.CurrentTime;
+        foreach (var blade in _blades)
+        {
+            if (blade.IsDeadOrDestroyed)
+                continue;
+
+            if (!_bladeTracks.TryGetValue(blade.InstanceID, out var track))
+            {
+                track = new BladeTrack();
+                _bladeTracks[blade.InstanceID] = track;
+            }
+
+            // 采样当前位置入队
+            track.SampleQueue.Add((now, blade.Position));
+
+            // 清理 >1.5s 的旧点
+            var cutoff = now.AddSeconds(-SampleDuration);
+            while (track.SampleQueue.Count > 0 && track.SampleQueue[0].Time < cutoff)
+                track.SampleQueue.RemoveAt(0);
+        }
+    }
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        var live = _blades.Where(blade => !blade.IsDeadOrDestroyed).ToArray();
-        foreach (var blade in live)
+        var now = WorldState.CurrentTime;
+        var spinning = Module.FindComponent<SpinningSweep>() is { } sweep && sweep.Casters.Count != 0;
+        var hurricaneActive = Module.FindComponent<BladeDodgeZone>()?.HurricaneActive == true;
+
+        foreach (var blade in _blades)
         {
+            if (blade.IsDeadOrDestroyed)
+                continue;
+
+            // 即时圆始终保留
             hints.AddForbiddenZone(AIShape, blade.Position);
-            if (blade.LastFrameMovement.LengthSq() > 0.0001f)
+
+            // 飓风期保持现有逻辑不变
+            if (hurricaneActive)
             {
-                // Aggressive test build (NOT part of the release): normal lead 12y; once a blade
-                // comes within 8y of the player, extend to 40y ahead so the AI bails out early.
-                // While the central green zone is active (47536 read -> 47532), keep the capsule
-                // short (6y) so it never blocks the central entry and disable the 40y switch.
-                var zoneActive = Module.FindComponent<BladeDodgeZone>()?.HurricaneActive == true;
-                var length = zoneActive ? 6f : (blade.Position - actor.Position).Length() < 8f ? 40f : PredictionLength;
-                // While SpinningSweep (47541) is casting, soften the capsule (activation now+2s,
-                // G>0) so the AI can afford to cross it while bailing out of the cone; otherwise
-                // keep the default (MinValue -> now, hard block G=0) so blades are avoided.
-                var spinning = Module.FindComponent<SpinningSweep>() is { } sweep && sweep.Casters.Count != 0;
-                var activation = spinning ? WorldState.CurrentTime.AddSeconds(2d) : default;
-                hints.AddForbiddenZone(new SDCapsule(blade.Position, blade.LastFrameMovement.Normalized(), length, 4.5f), activation);
+                // 飓风期：现有分支原样保留（length=6f 胶囊 + 中心 goal 都不动）
+                if (blade.LastFrameMovement.LengthSq() > 0.0001f)
+                {
+                    var activation = spinning ? now.AddSeconds(2d) : default;
+                    hints.AddForbiddenZone(new SDCapsule(blade.Position, blade.LastFrameMovement.Normalized(), 6f, 4.5f), activation);
+                }
+                continue;
+            }
+
+            // _settlementStarted 后不再生成预测段
+            if (_settlementStarted)
+                continue;
+
+        // 获取或创建该盘的跟踪状态
+        if (!_bladeTracks.TryGetValue(blade.InstanceID, out var track))
+        {
+            track = new BladeTrack();
+            track.LastDirUpdate = now.AddSeconds(-DirectionUpdateInterval); // 初始化为过期状态，首次立即更新
+            _bladeTracks[blade.InstanceID] = track;
+        }
+
+        // 周期性刷新方向：每 1 秒检查一次
+        if ((now - track.LastDirUpdate).TotalSeconds >= DirectionUpdateInterval)
+        {
+            var smoothDir = CalculateSmoothDirection(track, now);
+            if (smoothDir != null)
+            {
+                // 平滑方向有效，更新锁定方向
+                track.LockedDir = smoothDir.Value;
+                track.LastDirUpdate = now;
+            }
+            // 方向无效时保持旧方向（不更新 LockedDir 和 LastDirUpdate）
+        }
+
+        // 只有拥有有效锁定方向时才生成预测段
+        if (track.LockedDir == null)
+            continue;
+
+        // 计算预测段（每帧执行，起点=盘当前位置，方向=LockedDir）
+        AddPredictionSegments(hints, blade.Position, track.LockedDir.Value, now, spinning);
+        }
+    }
+
+    // 计算平滑方向：(当前pos - 约0.75s前pos) 归一化
+    private Angle? CalculateSmoothDirection(BladeTrack track, DateTime now)
+    {
+        if (track.SampleQueue.Count < 2)
+            return null;
+
+        // 找到约0.75s前的点
+        var targetTime = now.AddSeconds(-SampleDuration / 2); // 1.5s的一半即0.75s
+        (DateTime, WPos) closestOld = default;
+        var minDiff = double.MaxValue;
+
+        foreach (var sample in track.SampleQueue)
+        {
+            var diff = Math.Abs((sample.Time - targetTime).TotalSeconds);
+            if (diff < minDiff)
+            {
+                minDiff = diff;
+                closestOld = sample;
             }
         }
 
+        if (minDiff > 0.5) // 找不到足够接近的点
+            return null;
+
+        // 计算方向向量
+        var currentPos = track.SampleQueue[^1].Position; // 最新位置
+        var oldPos = closestOld.Item2;
+        var delta = currentPos - oldPos;
+        var distSq = delta.LengthSq();
+
+        // 两点距离 <0.5y 视为方向无效
+        if (distSq < 0.5f * 0.5f)
+            return null;
+
+        // 归一化方向并转换为Angle
+        var dir = delta.Normalized();
+        return Angle.FromDirection(dir);
+    }
+
+    // 添加预测段
+    private void AddPredictionSegments(AIHints hints, WPos pos, Angle dirAngle, DateTime now, bool spinning)
+    {
+        // 剩余寿命
+        if (_predictedEnd == null)
+            return;
+        var rem = (_predictedEnd.Value - now).TotalSeconds;
+        if (rem <= 0)
+            return;
+
+        // 将 Angle 转换为 WDir
+        var dir = dirAngle.ToDirection();
+
+        // 计算射线与场边圆的交点距离
+        var rayLen = RayCircleIntersection(pos, dir, ArenaCenter, ArenaRadius);
+        if (rayLen < 0)
+            rayLen = 0; // 当前已在边界外
+
+        // 总长 = min(rayLen, 速度 × 剩余时间)
+        var total = Math.Min(rayLen, BladeSpeed * rem);
+        if (total < MinTotalLength)
+            return; // 总长太短，不铺
+
+        // 按5s/段切分
+        var segmentLength = BladeSpeed * SegmentDuration; // 段长 = 2.9 × 5 = 14.5y
+        var numSegments = (int)Math.Ceiling(total / segmentLength);
+
+        for (var i = 0; i < numSegments; i++)
+        {
+            var startDist = i * segmentLength;
+            if (startDist >= total)
+                break;
+
+            var endDist = Math.Min(startDist + segmentLength, total);
+            var currentSegLength = (float)(endDist - startDist);
+
+            if (currentSegLength < 0.1f)
+                continue; // 段太短，跳过
+
+            // 计算段头位置
+            var segStart = pos + dir * (float)startDist;
+
+            // 创建胶囊段：SDCapsule(pos + dir×段起点距离, dir, 段长+0.5, 4.5f)
+            var capsule = new SDCapsule(segStart, dir, currentSegLength + 0.5f, 4.5f);
+
+            // 计算激活时刻：段头时刻 + spinning软化
+            var segmentTime = now.AddSeconds(startDist / BladeSpeed);
+            if (spinning)
+                segmentTime = segmentTime.AddSeconds(2d);
+
+            hints.AddForbiddenZone(capsule, segmentTime);
+        }
+    }
+
+    // 射线与圆求交，返回前方交点距离（若不相交返回负值）
+    private float RayCircleIntersection(WPos rayOrigin, WDir rayDir, WPos circleCenter, float circleRadius)
+    {
+        var oc = rayOrigin - circleCenter;
+        var a = rayDir.LengthSq(); // 应该是1.0（归一化向量）
+        var b = 2f * oc.Dot(rayDir);
+        var c = oc.LengthSq() - circleRadius * circleRadius;
+
+        var discriminant = b * b - 4 * a * c;
+        if (discriminant < 0)
+            return -1f; // 不相交
+
+        var sqrtD = (float)Math.Sqrt(discriminant);
+        var t1 = (-b - sqrtD) / (2 * a);
+        var t2 = (-b + sqrtD) / (2 * a);
+
+        // 取正的最小值（前方交点）
+        if (t1 >= 0 && t2 >= 0)
+            return Math.Min(t1, t2);
+        if (t1 >= 0)
+            return t1;
+        if (t2 >= 0)
+            return t2;
+        return -1f; // 都在后方
     }
 
     private void AddBlade(Actor blade)

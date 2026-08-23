@@ -26,7 +26,8 @@ sealed class IndexStates : StateMachineBuilder
                 .ActivateOnEnter<HolyLanceShockwaves>()
                 .ActivateOnEnter<SlashCombos>()
                 .ActivateOnEnter<AllConsumingFlames>()
-                .ActivateOnEnter<ProphecyMeteors>();
+                .ActivateOnEnter<ProphecyMeteors>()
+                .ActivateOnEnter<BombFocus>();
         }, "开场核爆");
         // 核爆读条结束 → 切封印武器循环
         p0.Raw.Update = () => Module.PrimaryActor.CastInfo?.Action.ID != (uint)AID.Flare;
@@ -46,7 +47,8 @@ sealed class IndexStates : StateMachineBuilder
                 .ActivateOnEnter<HolyLanceShockwaves>()
                 .ActivateOnEnter<SlashCombos>()
                 .ActivateOnEnter<AllConsumingFlames>()
-                .ActivateOnEnter<ProphecyMeteors>();
+                .ActivateOnEnter<ProphecyMeteors>()
+                .ActivateOnEnter<BombFocus>();
             CastMulti(id + 0x10, [(uint)AID.SealedImplements, (uint)AID.SealedImplements1], 6.3f, 4.7f, "封印武器");
             CastMulti(id + 0x20, [(uint)AID.SealedImplements, (uint)AID.SealedImplements1], 6.3f, 4.7f, "封印武器");
             CastMulti(id + 0x30, [(uint)AID.SealedImplements, (uint)AID.SealedImplements1], 6.3f, 4.7f, "封印武器");
@@ -70,7 +72,8 @@ sealed class IndexStates : StateMachineBuilder
                 .ActivateOnEnter<HolyLanceShockwaves>()
                 .ActivateOnEnter<SlashCombos>()
                 .ActivateOnEnter<AllConsumingFlames>()
-                .ActivateOnEnter<ProphecyMeteors>();
+                .ActivateOnEnter<ProphecyMeteors>()
+                .ActivateOnEnter<BombFocus>();
             Cast(id + 0x10, (uint)AID.ElementaryEvocation, 4.2f, 2.7f, "元素创造");
             Cast(id + 0x20, (uint)AID.ElementaryExpansion, 13.2f, 2.7f, "元素展开");
             Cast(id + 0x30, (uint)AID.ElementaryEvocation, 13.2f, 2.7f, "元素创造");
@@ -95,7 +98,8 @@ sealed class IndexStates : StateMachineBuilder
                 .ActivateOnEnter<HolyLanceShockwaves>()
                 .ActivateOnEnter<SlashCombos>()
                 .ActivateOnEnter<AllConsumingFlames>()
-                .ActivateOnEnter<ProphecyMeteors>();
+                .ActivateOnEnter<ProphecyMeteors>()
+                .ActivateOnEnter<BombFocus>();
             Cast(id + 0x10, (uint)AID.Summon, 6.3f, 2.7f, "召唤"); // 圣枪冲击波与封印武器并行（组件绘制）
             Cast(id + 0x20, (uint)AID.DuologyOfImplements2, 9.2f, 3.7f, "二连召唤·封印武器"); // 伴镰鼬/居合连招
             Cast(id + 0x30, (uint)AID.SealedImplements3, 3.1f, 1.7f, "封印武器·连招");
@@ -123,7 +127,8 @@ sealed class IndexStates : StateMachineBuilder
                 .ActivateOnEnter<HolyLanceShockwaves>()
                 .ActivateOnEnter<SlashCombos>()
                 .ActivateOnEnter<AllConsumingFlames>()
-                .ActivateOnEnter<ProphecyMeteors>();
+                .ActivateOnEnter<ProphecyMeteors>()
+                .ActivateOnEnter<BombFocus>();
             Cast(id + 0x10, (uint)AID.ElementaryExpansion, 4.2f, 2.7f, "元素展开");
             CastMulti(id + 0x20, [(uint)AID.SealedImplements, (uint)AID.SealedImplements1], 19.2f, 4.7f, "封印武器"); // 展开后插入
             Cast(id + 0x30, (uint)AID.ElementaryEvocation, 19.2f, 2.7f, "元素创造");
@@ -148,7 +153,8 @@ sealed class IndexStates : StateMachineBuilder
                 .ActivateOnEnter<HolyLanceShockwaves>()
                 .ActivateOnEnter<SlashCombos>()
                 .ActivateOnEnter<AllConsumingFlames>()
-                .ActivateOnEnter<ProphecyMeteors>();
+                .ActivateOnEnter<ProphecyMeteors>()
+                .ActivateOnEnter<BombFocus>();
             Cast(id + 0x10, (uint)AID.Summon, 6.3f, 2.7f, "召唤");
         });
     }

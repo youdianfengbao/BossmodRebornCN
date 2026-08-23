@@ -861,6 +861,45 @@ sealed class ProphecyMeteors(BossModule module) : ReplayValidatedCastAOEs(module
     }
 }
 
+// 爆弹怪自动选中（Summon 48408 召唤后生成，场上存在爆弹怪时AI优先选中）：
+// 爆弹怪（OID 0x4B60）在场时，AI自动选中离玩家最近的一只（Priority=2 强制优先，不干预其他目标选择）；
+// 全部爆弹怪被击杀后恢复正常目标选择（组件不做任何事）。
+sealed class BombFocus(BossModule module) : BossComponent(module)
+{
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        // 收集所有存活的爆弹怪
+        var bombs = Module.Enemies((uint)OID.SummonedBomb).Where(b => !b.IsDeadOrDestroyed).ToList();
+        if (bombs.Count == 0)
+            return; // 没有爆弹怪时不干预
+
+        // 遍历PotentialTargets，设置爆弹怪优先级并找出离玩家最近的一只
+        Actor? forcedTarget = null;
+        var forcedDistSq = float.MaxValue;
+
+        foreach (var target in hints.PotentialTargets)
+        {
+            if (target.Actor.OID == (uint)OID.SummonedBomb)
+            {
+                target.Priority = 2; // 设置高优先级
+
+                var distSq = (target.Actor.Position - actor.Position).LengthSq();
+                if (distSq < forcedDistSq)
+                {
+                    forcedDistSq = distSq;
+                    forcedTarget = target.Actor;
+                }
+            }
+        }
+
+        // 强制选中最近的爆弹怪
+        if (forcedTarget != null)
+        {
+            hints.ForcedTarget = forcedTarget;
+        }
+    }
+}
+
 // 异形场地周期切换（2026-08-07 用户实测修正：元素控制读条完毕生成 / 元素整合读条完毕回收）：
 // 初始 3 平台（南/东北/西北）→ 元素控制（48394）读条结束 → 6 平台；
 // 元素整合（48401）读条期间额外 3 平台（东南/西南/北）红色禁入提示 → 读条结束 → 切回 3 平台并清提示。
