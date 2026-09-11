@@ -45,6 +45,7 @@ public enum Class : byte
     SGE = 40,
     VPR = 41,
     PCT = 42,
+    BST = 43, // 驯兽师（Beastmaster），国服 7.5 新增限定职业，Job ID 43（已从本地 CN 客户端 ClassJob 表验证：Row 43 / 缩写 BST）
 }
 
 public enum ClassCategory
@@ -73,7 +74,9 @@ public static class ClassRole
     {
         Class.GLA or Class.PLD or Class.MRD or Class.WAR or Class.DRK or Class.GNB => ClassCategory.Tank,
         Class.SCH or Class.CNJ or Class.WHM or Class.AST or Class.SGE => ClassCategory.Healer,
-        Class.LNC or Class.DRG or Class.PGL or Class.MNK or Class.ROG or Class.NIN or Class.SAM or Class.RPR or Class.VPR => ClassCategory.Melee,
+        // 驯兽师 BST（Job ID 43）按近战归类：实际战斗方式为近战（单手斧），影响 AI 的 Melee/Ranged 分流（如 MeleeMaxDistanceToTarget）。
+        // 注意：游戏数据 ClassJob.Role 字段对 BST 为 0（与 BLU 相同，限定职业无 Role），故无法依赖 Role 字段动态判断，需在此静态归类。
+        Class.LNC or Class.DRG or Class.PGL or Class.MNK or Class.ROG or Class.NIN or Class.SAM or Class.RPR or Class.VPR or Class.BST => ClassCategory.Melee,
         Class.ARC or Class.BRD or Class.MCH or Class.DNC => ClassCategory.PhysRanged,
         Class.THM or Class.BLM or Class.ACN or Class.SMN or Class.RDM or Class.PCT => ClassCategory.Caster,
         Class.BLU => allowLimited ? ClassCategory.Limited : ClassCategory.Caster,
