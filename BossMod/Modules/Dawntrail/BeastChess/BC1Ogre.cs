@@ -59,14 +59,109 @@ sealed class MagmaBursts(BossModule module) : ReplayValidatedCastAOEs(module)
     };
 }
 
-// 火球爆炸（延烧）
-sealed class FireballBlast(BossModule module) : ReplayValidatedCastAOEs(module)
+// 火球机制（用户游戏画面确认的完整时序）：46921 读条 4s 结算 → 火球 0x4B8F 出生在 boss 脚下 →
+// 火球向"出生瞬间玩家所在位置"移动（旧场实测漂移 ~0.9y，爆炸点=玩家出生瞬间位置附近）→
+// 出生后 ~5.7s 火球开始读 46922 延烧（1.0s）→ 爆炸（圆 R10）。
+// 预警时序（用户定稿）：出生时 snapshot 玩家位置 → 出生+4s 起画 R10 预警圈（圆心=snapshot）→
+// 46922 开始读条时圆心由火球本体接管（每帧跟随），activation=读条完成 → 爆炸后移除。
+// 旧场唯一完整样本：出生 10828.66 → 画圈 10832.66 → 读条接管 10834.38 → 爆炸 10835.36。
+// snapshot 双路：46921 CST! 结算先建状态（保底，新场回放有）；0x4B8F ACT+ 出生时刷新精确位置；
+// 30s 兜底重置防事件缺失卡死（吸取五列扫击跨波字典残留教训，全事件驱动+Update 兜底，无跨波字典）。
+sealed class FireballBlast(BossModule module) : BossComponent(module)
 {
-    protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
+    private const float Radius = 10f;
+    private const double WarningDelay = 4d;     // 出生到预警出现
+    private const double EstimatedBlast = 6.7d; // 出生到爆炸的实测总时长（预警期预估紧迫度用）
+    private const double FailsafeReset = 30d;   // 出生后无后续事件的强制重置窗口
+    private static readonly AOEShapeCircle Shape = new(Radius);
+
+    private enum Stage { Idle, Tracking, Takeover }
+    private Stage _stage;
+    private WPos _target;         // snapshot 的玩家位置（=预计爆炸圆心），接管阶段切换为火球实时位置
+    private DateTime _bornAt;
+    private DateTime _activation; // 接管后 = 46922 读条完成时刻
+
+    private Actor? Fireball => Module.Enemies((uint)OID.Fireball).FirstOrDefault(f => !f.IsDeadOrDestroyed);
+    private bool WarningActive => _stage != Stage.Idle && (_stage == Stage.Takeover || WorldState.CurrentTime >= _bornAt.AddSeconds(WarningDelay));
+
+    private static WPos SnapshotPlayer(BossModule module) => module.WorldState.Party.Player()?.Position ?? module.PrimaryActor.Position;
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
-        (uint)AID.ArmOfPurgatory => new(new AOEShapeCircle(10f)),
-        _ => null,
-    };
+        if (spell.Action.ID == (uint)AID.FireCall) // 46921 结算：火球即将出现，先按当前玩家位置建状态（保底）
+        {
+            _target = SnapshotPlayer(Module);
+            _bornAt = WorldState.CurrentTime;
+            _stage = Stage.Tracking;
+        }
+        else if (spell.Action.ID == (uint)AID.ArmOfPurgatory) // 46922 爆炸
+        {
+            Reset();
+        }
+    }
+
+    public override void OnActorCreated(Actor actor)
+    {
+        // 火球 actor 实际出现：刷新 snapshot 到出生瞬间（比 CST! 晚 ~0.9s，更精确）
+        if (actor.OID == (uint)OID.Fireball && _stage == Stage.Tracking)
+        {
+            _target = SnapshotPlayer(Module);
+            _bornAt = WorldState.CurrentTime;
+        }
+    }
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        // 46922 开始读条：圆心由火球本体接管（Update 每帧跟随），activation=读条完成
+        if (_stage != Stage.Idle && spell.Action.ID == (uint)AID.ArmOfPurgatory)
+        {
+            _stage = Stage.Takeover;
+            _activation = Module.CastFinishAt(spell);
+        }
+    }
+
+    public override void OnActorDestroyed(Actor actor)
+    {
+        if (actor.OID == (uint)OID.Fireball && _stage != Stage.Idle)
+            Reset();
+    }
+
+    public override void Update()
+    {
+        if (_stage == Stage.Idle)
+            return;
+        if (WorldState.CurrentTime > _bornAt.AddSeconds(FailsafeReset))
+        {
+            Reset();
+            return;
+        }
+        if (_stage == Stage.Takeover)
+        {
+            var fireball = Fireball;
+            if (fireball == null)
+            {
+                Reset();
+                return;
+            }
+            _target = fireball.Position;
+        }
+    }
+
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    {
+        if (WarningActive)
+            Arena.ZoneCircle(_target, Radius, Colors.AOE);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (!WarningActive)
+            return;
+        // 预警期用实测总时长做预估紧迫度；接管期切精确读条完成时刻
+        hints.AddForbiddenZone(Shape.Distance(_target, default), _stage == Stage.Takeover ? _activation : _bornAt.AddSeconds(EstimatedBlast));
+    }
+
+    private void Reset() => _stage = Stage.Idle;
 }
 
 // 残留火圈（46917，东西落点 (104,-420)/(136,-420)，R5）：
