@@ -66,8 +66,10 @@ sealed class DismemberColumns(BossModule module) : ReplayValidatedCastAOEs(modul
 
     protected override int MaxDisplayed => 10; // 每波 5 列 x 2 击
 
-    // 窗口只留显示语义（本组件禁区在 AddAIHints 全程挂载，与窗口解耦）：生效前 0.5s 标红
-    protected override double RiskyActivationWindow => 0.5d;
+    // 不覆写 RiskyActivationWindow（基类默认 PositiveInfinity → ActiveAOEs 完全不做 danger 标红，
+    // 10 条全部普通预警色）。用户实测修正：0.5s 提前标红会误导玩家提前踏入尚未结算的列；
+    // AI 层本组件禁区完全自管（AddAIHints 全程挂载，与 Risky 标志无关），紧迫度仅由
+    // 终点列禁区的真实 activation 时间语义驱动。
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {

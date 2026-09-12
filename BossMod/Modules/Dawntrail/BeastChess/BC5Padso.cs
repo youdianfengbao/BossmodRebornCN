@@ -22,8 +22,8 @@ public enum AID : uint
     BloodRainCircle = 46926, // 血雨：Helper->self（与 boss 同位同朝向），5.7s cast，实心圆 R8（CT2/ER8，omen general_1bf）
     Summon = 46927, // 召唤：boss->self，3.7s cast，召出梦魔法师×1+梦魔骑士×2（CT1/ER0 无伤害形状，不画）
     Fanaticism = 46928, // 盲信：梦魔法师->boss，5.7s cast，对 boss 的增益（CT1/ER0 无伤害形状，不画）
-    VoidFireII = 46929, // 虚空烈炎：梦魔法师->self，3.7s cast，圆 R10（CT2/ER10，omen general_1bf）
-    SweetSteel = 46930, // 甜钢：梦魔骑士->self，3.7s cast，扇形 120° R10（CT13/ER10，omen gl_fan120_1bf）
+    VoidFireII = 46929, // 虚空烈炎：梦魔法师->指定地点，3.7s cast，圆 R10（CT2/ER10，omen general_1bf）；落点在小怪前方约 3.5-4.0y（CST+ 瞬间的瞄准方向，通常朝玩家），不在脚下（三份回放实测）
+    SweetSteel = 46930, // 甜钢：梦魔骑士->self，3.7s cast，扇形 120° R10（CT13/ER10，omen gl_fan120_1bf）；落点字段距 caster 0-2.1y≈脚下、扇形沿自身朝向（追击玩家中即朝玩家），self 配置正确
     Unknown46931 = 46931, // (无名)：boss no-cast 事件占位（两回放各 2 次，CT1/ER0）
     VoidAeroIILine = 46932, // 虚空烈风：boss->self，3.7s cast，正面直线矩形 60x8（用户实测有伤害；CT12/ER60/XMod8 → Rect(60,4) 参照 46870 映射，boss 朝向即矩形方向）；46933 七扇为同机制衍生
     VoidAeroII = 46933, // 虚空烈风：Helper->self，2.7s cast，扇形 20° R60（CT13/ER60，omen gl_fan020_0f）；7 个 Helper 同点 25° 等角扇面齐发（150° 扇区）
@@ -74,7 +74,7 @@ sealed class DreamAddAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
-        (uint)AID.VoidFireII => new(VoidFire),
+        (uint)AID.VoidFireII => new(VoidFire, LocationTargeted: true),
         (uint)AID.SweetSteel => new(SweetSteel),
         _ => null,
     };
