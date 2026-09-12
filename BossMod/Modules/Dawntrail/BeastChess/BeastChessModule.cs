@@ -28,4 +28,28 @@ public abstract class BeastChessModule(WorldState ws, Actor primary) : BossModul
         }
         return best;
     }
+
+    // 本场需要全部击杀的敌人 OID 列表（含 primary）；双 boss / 多怪场由派生类列出全部成员
+    public abstract uint[] EnemiesOfInterest { get; }
+
+    // 全部敌人（含 primary）死亡或销毁 = 战斗结束
+    public bool EnemiesAllDead()
+    {
+        foreach (var oid in EnemiesOfInterest)
+        {
+            foreach (var enemy in Enemies(oid))
+            {
+                if (!enemy.IsDeadOrDestroyed)
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    // 双 boss 场 primary（如骑士 0x4B86）先死时战斗仍在继续：正常卸载路径由各 States 的
+    // TrivialPhase Raw.Update 覆写阻止（默认谓词只查 PrimaryActor 死亡，见 StateMachineBuilder.DeathPhase:160，
+    // phase 结束后 BossModuleManager.Update 即按 wasActive 卸载模块）；本覆写作为语义显式化的双保险——
+    // primary 已死但场内仍有存活敌人时不允许重置，全部敌人死亡才允许（单 boss 场 primary 死=全灭，行为不变）。
+    // 注意：CheckReset 仅在模块 active 时被查询（BossModuleManager.Update），phase 已结束后不起作用。
+    public override bool CheckReset() => PrimaryActor.IsDeadOrDestroyed && EnemiesAllDead();
 }

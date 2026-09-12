@@ -48,27 +48,25 @@ sealed class ArchFiendAOEs(BossModule module) : ReplayValidatedCastAOEs(module)
 }
 
 // 肢解五连：boss 读条 46877 结束后，5 个 Helper（x=504..536 等距 8y 站南缘，矩形沿自身朝向贯穿全场）
-// 依次开始读条——回放实测各列 CST+ 间隔约 1s，扫击方向逐波交替（东→西 / 西→东）；
-// 每列两个 Helper 同时读条：46878（3.7s 先击）+ 46879（4.2s 后击），同列两击间隔 0.5~1s。
-// 组件直接挂 Helper 读条，activation=CastFinishAt 天然逐列步进；1.5s 内将生效的段标 danger，
-// AI 按时间轴先躲早生效段再躲晚段。
+// 依次开始读条——回放实测各列 CST+ 间隔 0.4~1.3s 递增阶梯，扫击方向逐波交替（东→西 / 西→东）；
+// 每列两个 Helper 同时读条同站位：46878（3.7s 先击）+ 46879（4.2s 后击），同列两击间隔 0.47~0.54s。
+// 组件直接挂 Helper 读条，activation=CastFinishAt；显示层全程 10 条可见，生效前 0.5s 标红。
 //
-// 第 5 列（x≈536）按第 4 列（x≈528）同刻处理（activation 覆写对齐，用户实测）：原样逐列步进时 AI 会在
-// 第 4 列区域等待、第 5 列激活后被赶去第 5 列、又因第 4 列将生效而折返，来回拉扯；对齐后危险批次为
-// 列1→列2→列3→列4+5（同刻），AI 在列 3 区域等待即可一次覆盖最后两列。仅改显示/AI 判定时序，游戏结算不变。
-// 两列读条起始顺序逐波交替，故双向绑定：第 4 列先出现则回填第 5 列，反之第 5 列挂起待第 4 列出现后对齐。
+// AI 策略（用户定稿：一次移动到终点列站桩）：前 4 列挂 G=0 立即死区（activation=default，AI 绝不踏入、
+// 也不逐列迁移——列间隔 0.4~1.3s 跑不完 8y 的旧问题直接消失），只有最后生效的列（终点列）挂各自真实
+// activation 的正常紧迫度，AI 开场直奔终点列等扫完（与毒蛛网"往最后生效处躲"思路一致）。
+// 历史教训：此前"第 5 列对齐第 4 列"方案依赖跨波字典，Helper actor 跨波复用不销毁导致残留时刻
+// 污染新波列序（列 1 时机错乱），已整体移除；本方案无需任何跨条目状态。
+// 分组按 Origin 聚类而非固定 index 配对：同列两击 Helper 站同一点（Origin 相同），结算推进会改变
+// pending 奇偶而 Origin 稳定，免疫漂移。
 sealed class DismemberColumns(BossModule module) : ReplayValidatedCastAOEs(module)
 {
-    private const float FifthColumnX = 534f; // 第 5 列 Helper x≈536（≥534 判定）；第 4 列 x≈528
+    private const float SameColumnDistSq = 0.25f; // 同列判定：两击 Helper 站同一点，0.5y 内视为同列
     private static readonly AOEShapeRect Dismember = new(35f, 4f);
-
-    private readonly Dictionary<uint, ulong> _fifthByAction = []; // actionID -> 第 5 列 caster InstanceID（每波每 action 至多一个第 5 列）
-    private readonly Dictionary<uint, DateTime> _fourthActivation = []; // actionID -> 第 4 列完成时刻
 
     protected override int MaxDisplayed => 10; // 每波 5 列 x 2 击
 
-    // 窗口同时控制 danger 红标出现时机与（基类默认的）禁区挂载；本组件禁区已全程挂载（见下），
-    // 窗口只留显示语义：生效前 0.5s 标红（原 1.5s 过大，实测会提前 1.5s 把后续列染红误导 AI/玩家）
+    // 窗口只留显示语义（本组件禁区在 AddAIHints 全程挂载，与窗口解耦）：生效前 0.5s 标红
     protected override double RiskyActivationWindow => 0.5d;
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
@@ -77,58 +75,25 @@ sealed class DismemberColumns(BossModule module) : ReplayValidatedCastAOEs(modul
         _ => null,
     };
 
-    // AI 层：全部 pending 从读条起挂禁区（与 RiskyActivationWindow 解耦，用户实测修正）：
-    // 列间间隔仅 0.4~1.32s，若按窗口挂载则多列同时禁区、全场无处可去；全程挂载后 activation
-    // 时间语义（禁区分值随时间逼近递增）驱动 AI 提前规划、始终落后扫击一列逐列迁移。
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         var pending = Pending; // 基类保证按 activation 升序；从 CST+ 起即入列（3.94s 全程可见）
-        for (var i = 0; i < pending.Length; ++i)
-        {
-            ref readonly var entry = ref pending[i];
-            hints.AddForbiddenZone(entry.AOE.ShapeDistance ?? entry.AOE.Shape.Distance(entry.AOE.Origin, entry.AOE.Rotation), entry.AOE.Activation);
-        }
-    }
-
-    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
-    {
-        base.OnCastStarted(caster, spell);
-        if (ConfigFor(spell.Action.ID) == null)
+        var count = pending.Length;
+        if (count == 0)
             return;
 
-        var x = caster.Position.X;
-        if (x >= FifthColumnX)
-        {
-            _fifthByAction[spell.Action.ID] = caster.InstanceID;
-            if (_fourthActivation.TryGetValue(spell.Action.ID, out var fourth))
-                AlignFifth(spell.Action.ID, fourth);
-        }
-        else if (x >= FifthColumnX - 8f)
-        {
-            var activation = Module.CastFinishAt(spell);
-            _fourthActivation[spell.Action.ID] = activation;
-            AlignFifth(spell.Action.ID, activation);
-        }
-    }
+        // 从尾向前找终点列（最后生效组）的起始下标：与队尾条目同位置（Origin 聚类）的连续段
+        var groupStart = count - 1;
+        while (groupStart > 0 && (pending[groupStart - 1].AOE.Origin - pending[count - 1].AOE.Origin).LengthSq() < SameColumnDistSq)
+            --groupStart;
 
-    private void AlignFifth(uint actionID, DateTime activation)
-    {
-        if (_fifthByAction.TryGetValue(actionID, out var fifth))
-            AdjustPendingActivation(actionID, fifth, activation);
-    }
-
-    public override void OnActorDestroyed(Actor actor)
-    {
-        // 字典 key=actionID / value=casterID，按 casterID 反查移除，防跨波累积
-        foreach (var (actionID, casterID) in _fifthByAction)
+        for (var i = 0; i < count; ++i)
         {
-            if (casterID == actor.InstanceID)
-            {
-                _fifthByAction.Remove(actionID);
-                break;
-            }
+            ref readonly var entry = ref pending[i];
+            var shape = entry.AOE.ShapeDistance ?? entry.AOE.Shape.Distance(entry.AOE.Origin, entry.AOE.Rotation);
+            // 终点列用真实 activation（正常紧迫度），前面各列 G=0 立即死区
+            hints.AddForbiddenZone(shape, i < groupStart ? default : entry.AOE.Activation);
         }
-        base.OnActorDestroyed(actor);
     }
 }
 
@@ -138,7 +103,8 @@ sealed class BC3ArchFiendStates : StateMachineBuilder
     {
         TrivialPhase()
             .ActivateOnEnter<ArchFiendAOEs>()
-            .ActivateOnEnter<DismemberColumns>();
+            .ActivateOnEnter<DismemberColumns>()
+            .Raw.Update = () => ((BeastChessModule)Module).EnemiesAllDead();
     }
 }
 
@@ -157,6 +123,9 @@ sealed class BC3ArchFiendStates : StateMachineBuilder
     PlanLevel = 0)]
 public sealed class BC3ArchFiend(WorldState ws, Actor primary) : BeastChessModule(ws, primary)
 {
+    // 单 boss 场（深渊之枪 0x4B89 是不可击杀地标，不算敌人）：primary 死=全灭，行为不变
+    public override uint[] EnemiesOfInterest => [(uint)OID.Boss];
+
     protected override void DrawEnemies(int pcSlot, Actor pc)
     {
         Arena.Actor(PrimaryActor);

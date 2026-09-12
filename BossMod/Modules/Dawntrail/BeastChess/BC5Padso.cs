@@ -25,7 +25,7 @@ public enum AID : uint
     VoidFireII = 46929, // 虚空烈炎：梦魔法师->self，3.7s cast，圆 R10（CT2/ER10，omen general_1bf）
     SweetSteel = 46930, // 甜钢：梦魔骑士->self，3.7s cast，扇形 120° R10（CT13/ER10，omen gl_fan120_1bf）
     Unknown46931 = 46931, // (无名)：boss no-cast 事件占位（两回放各 2 次，CT1/ER0）
-    VoidAeroIIVisual = 46932, // 虚空烈风：boss->self，3.7s cast，visual（CT12/ER60/XMod8 无 omen；伤害由 46933 承载，boss 朝向=Helper 出场方位）
+    VoidAeroIILine = 46932, // 虚空烈风：boss->self，3.7s cast，正面直线矩形 60x8（用户实测有伤害；CT12/ER60/XMod8 → Rect(60,4) 参照 46870 映射，boss 朝向即矩形方向）；46933 七扇为同机制衍生
     VoidAeroII = 46933, // 虚空烈风：Helper->self，2.7s cast，扇形 20° R60（CT13/ER60，omen gl_fan020_0f）；7 个 Helper 同点 25° 等角扇面齐发（150° 扇区）
     BloodSword = 46934, // 嗜血剑：boss->player，5.7s cast，单体（CT1/ER0）
     ColdCaress = 46935, // 寒毒接触：boss->player，4.7s cast，单体（CT1/ER0；实测命中 dist 2.6-5.1y rel_ang 无规律）
@@ -48,16 +48,19 @@ sealed class BloodRain(BossModule module) : ReplayValidatedCastAOEs(module)
     };
 }
 
-// 虚空烈风七连扇：boss 读 46932 引导（朝向=出场方位）结束后，7 个 Helper 在同一点同时读 2.7s 条，
-// 各自朝向 25° 等角排开（实测扇区跨 150°），起点方位逐波旋转。全部 pending 同时结算，默认全部危险即可。
+// 虚空烈风：boss 读 46932 正面直线矩形 60x8（用户实测有伤害，CT12 映射 Rect(60,4)，同 46870 古代疾风），
+// 结束后 7 个 Helper 在同一点同时读 46933（2.7s 条，扇形 20° R60，25° 等角排开跨 150°，起点方位逐波旋转）。
+// 同机制两段挂同一组件，activation=CastFinishAt 天然先矩形后七扇；每波 1+7=8 条，全部同时段结算。
 sealed class VoidAeroFan(BossModule module) : ReplayValidatedCastAOEs(module)
 {
+    private static readonly AOEShapeRect VoidAeroLine = new(60f, 4f);
     private static readonly AOEShapeCone Shape = new(60f, 10f.Degrees()); // omen fan020 = 20° 全角
 
-    protected override int MaxDisplayed => 8; // 每波 7 扇，留 1 余量
+    protected override int MaxDisplayed => 8; // 每波 1 矩形 + 7 扇
 
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
+        (uint)AID.VoidAeroIILine => new(VoidAeroLine),
         (uint)AID.VoidAeroII => new(Shape),
         _ => null,
     };
@@ -89,7 +92,8 @@ sealed class BC5PadsoStates : StateMachineBuilder
             .ActivateOnEnter<VoidAeroFan>()
             .ActivateOnEnter<DreamAddAOEs>()
             .ActivateOnEnter<BloodSword>()
-            .ActivateOnEnter<ColdCaress>();
+            .ActivateOnEnter<ColdCaress>()
+            .Raw.Update = () => ((BeastChessModule)Module).EnemiesAllDead();
     }
 }
 
@@ -108,7 +112,7 @@ sealed class BC5PadsoStates : StateMachineBuilder
     PlanLevel = 0)]
 public sealed class BC5Padso(WorldState ws, Actor primary) : BeastChessModule(ws, primary)
 {
-    public static readonly uint[] EnemiesOfInterest = [(uint)OID.Boss, (uint)OID.DreamMage, (uint)OID.DreamKnight];
+    public override uint[] EnemiesOfInterest => [(uint)OID.Boss, (uint)OID.DreamMage, (uint)OID.DreamKnight];
 
     protected override void DrawEnemies(int pcSlot, Actor pc) => Arena.Actors(this, EnemiesOfInterest);
 }

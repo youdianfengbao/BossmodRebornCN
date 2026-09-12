@@ -1,3 +1,4 @@
+using BossMod.Components;
 using BossMod.Dawntrail.Foray.CriticalEngagement;
 
 namespace BossMod.Dawntrail.BeastChess.BC2KnightBishop;
@@ -14,7 +15,7 @@ public enum OID : uint
 
 public enum AID : uint
 {
-    ForwardGuard = 46864, // 前线护卫：骑士->self，4.7s cast，自身增益（CastType1/ER0，无伤害形状）
+    ForwardGuard = 46864, // 前线护卫：骑士->self，4.7s cast；结算后获得方向招架 buff（SID 680 extra=0x1 正面），正面攻击被招架，需绕背输出（见 ForwardGuard 组件）
     KnightUnknown = 46865, // (无名)：骑士，no cast，事件占位（两回放各 1 次）
     Tumulus = 46866, // 古墓：骑士->self，4.7s cast，圆形 R6（CastType2/ER6）
     DeathSpiralVisual = 46867, // 死亡螺旋：主教->self，4.7s cast，visual（伤害见 46868）
@@ -61,8 +62,50 @@ sealed class BlackEruptionChains(BossModule module) : ReplayValidatedCastAOEs(mo
     };
 }
 
+// 前线护卫：骑士结算 46864 后获得方向招架 buff（SID 680，extra=0x1 正面），正面攻击被招架，需绕背输出。
+// 回放实测（10_21_47 / 10_59_25）：46864 读条 4.7s 结算后立刻 gain（extra=0001=Front，剩余 998.983s≈战斗
+// 剩余全程，两场均无 loss 行——持续到战斗结束）；读条期间 PredictParrySide 画"即将招架"暗色弧线。
+// 组件自带：激活时正面 SDCone 禁区 + 目标优先级惩罚（AI 转打主教）+ 文字提示；追加背后 GoalZones
+// （骑士背后 3y，权重 10 中等——引导绕背但不压过躲 AOE）。
+sealed class ForwardGuard(BossModule module) : DirectionalParry(module, [(uint)OID.Boss])
+{
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.ForwardGuard)
+        {
+            PredictParrySide(caster.InstanceID, Side.Front);
+        }
+    }
+
+    public override void OnStatusLose(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == ParrySID)
+        {
+            UpdateState(actor.InstanceID, 0);
+        }
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        if (!Active)
+            return;
+
+        foreach (var (id, state) in ActorStates)
+        {
+            var target = WorldState.Actors.Find(id);
+            if (target == null || target.IsDeadOrDestroyed || (state & (int)Side.Front) == 0)
+                continue;
+            var behind = target.Position - target.Rotation.ToDirection() * 3f;
+            hints.GoalZones.Add(AIHints.GoalSingleTarget(behind, 2.5f, 10f));
+        }
+    }
+}
+
 sealed class Skullsplinter(BossModule module) : Components.SingleTargetCast(module, (uint)AID.Skullsplinter);
 
+// 双 boss 场：骑士 primary 先死时主教仍在战斗——States 的 Raw.Update 覆写默认"primary 死亡即结束"，
+// 改为全部敌人（骑士+主教）死亡才结束模块（基类 EnemiesAllDead，见 BeastChessModule 注释）
 sealed class BC2KnightBishopStates : StateMachineBuilder
 {
     public BC2KnightBishopStates(BossModule module) : base(module)
@@ -70,7 +113,9 @@ sealed class BC2KnightBishopStates : StateMachineBuilder
         TrivialPhase()
             .ActivateOnEnter<KnightAOEs>()
             .ActivateOnEnter<BlackEruptionChains>()
-            .ActivateOnEnter<Skullsplinter>();
+            .ActivateOnEnter<ForwardGuard>()
+            .ActivateOnEnter<Skullsplinter>()
+            .Raw.Update = () => ((BeastChessModule)Module).EnemiesAllDead();
     }
 }
 
@@ -89,7 +134,7 @@ sealed class BC2KnightBishopStates : StateMachineBuilder
     PlanLevel = 0)]
 public sealed class BC2KnightBishop(WorldState ws, Actor primary) : BeastChessModule(ws, primary)
 {
-    public static readonly uint[] EnemiesOfInterest = [(uint)OID.Boss, (uint)OID.Bishop];
+    public override uint[] EnemiesOfInterest => [(uint)OID.Boss, (uint)OID.Bishop];
 
     protected override void DrawEnemies(int pcSlot, Actor pc) => Arena.Actors(this, EnemiesOfInterest);
 }

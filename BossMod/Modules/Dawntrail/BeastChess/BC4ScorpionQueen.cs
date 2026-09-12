@@ -40,6 +40,11 @@ sealed class BedrockUplift(BossModule module) : ReplayValidatedCastAOEs(module)
     private static readonly AOEShapeDonut Stage3 = new(12f, 18f);
     private static readonly AOEShapeDonut Stage4 = new(18f, 24f);
 
+    // 显示层与 AI 对齐：四段序贯扩张（R6 圆 + 月环 6-12/12-18/18-24 无缝相接覆盖 R0-24 > 场地 R20），
+    // 全画会铺满雷达（用户实测）——只显示当前段（pending 按 activation 升序取第一项），
+    // 段 1 结算移除后自动切到段 2；全量预览没有价值反而遮场。
+    protected override int MaxDisplayed => 1;
+
     protected override AOEConfig? ConfigFor(uint actionID) => actionID switch
     {
         (uint)AID.BedrockUplift1 => new(Stage1),
@@ -108,7 +113,8 @@ sealed class BC4ScorpionQueenStates : StateMachineBuilder
             .ActivateOnEnter<BedrockUplift>()
             .ActivateOnEnter<VenomWebs>()
             .ActivateOnEnter<SilkscreenLasers>()
-            .ActivateOnEnter<DeadlyThrust>();
+            .ActivateOnEnter<DeadlyThrust>()
+            .Raw.Update = () => ((BeastChessModule)Module).EnemiesAllDead();
     }
 }
 
@@ -127,7 +133,7 @@ sealed class BC4ScorpionQueenStates : StateMachineBuilder
     PlanLevel = 0)]
 public sealed class BC4ScorpionQueen(WorldState ws, Actor primary) : BeastChessModule(ws, primary)
 {
-    public static readonly uint[] EnemiesOfInterest = [(uint)OID.Boss, (uint)OID.SpiritScorpion];
+    public override uint[] EnemiesOfInterest => [(uint)OID.Boss, (uint)OID.SpiritScorpion];
 
     protected override void DrawEnemies(int pcSlot, Actor pc) => Arena.Actors(this, EnemiesOfInterest);
 }
