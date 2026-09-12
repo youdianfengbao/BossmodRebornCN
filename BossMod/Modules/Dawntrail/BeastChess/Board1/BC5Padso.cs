@@ -1,6 +1,7 @@
+// 斗兽奇弈·低段第一盘（Board1）
 using BossMod.Dawntrail.Foray.CriticalEngagement;
 
-namespace BossMod.Dawntrail.BeastChess.BC5Padso;
+namespace BossMod.Dawntrail.BeastChess.Board1.BC5Padso;
 
 // 骨架+机制预警：魅惑女妖场（B 槽，矩形 24x38）。boss 读 46927 召唤梦魔法师×1+梦魔骑士×2 助战。
 // AID 数据来自 2026-09-12 两份回放（03_01_44 / 12_21_41）交叉验证 + xivapi Action 表（CastType/EffectRange/XAxisModifier/Omen），

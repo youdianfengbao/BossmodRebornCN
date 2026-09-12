@@ -1,6 +1,7 @@
+// 斗兽奇弈·低段第一盘（Board1）
 using BossMod.Dawntrail.Foray.CriticalEngagement;
 
-namespace BossMod.Dawntrail.BeastChess.BC1Ogre;
+namespace BossMod.Dawntrail.BeastChess.Board1.BC1Ogre;
 
 // 奇子·食人魔场（A 槽，圆 R20）。
 // AID 数据来自 2026-09-12 两份回放（02_58_36 / 11_38_08）交叉验证 + xivapi Action 表（CastType/EffectRange/XAxisModifier/Omen），

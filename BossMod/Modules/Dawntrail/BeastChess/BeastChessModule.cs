@@ -1,3 +1,5 @@
+// 斗兽奇弈按盘组织：Board1~3 = 低段三盘，Board4~5 = 高段两盘。
+// 每盘一个子目录 + 子命名空间（保留每模块独立 namespace 以隔离各自的 OID/AID 枚举）；共享基类与槽位表在本文件。
 namespace BossMod.Dawntrail.BeastChess;
 
 // 斗兽奇弈（BST，单人 Roguelike 爬塔，ZONE 1339，CFC 1088）共享模块基类。

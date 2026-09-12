@@ -1,6 +1,7 @@
+// 斗兽奇弈·低段第一盘（Board1）
 using BossMod.Dawntrail.Foray.CriticalEngagement;
 
-namespace BossMod.Dawntrail.BeastChess.BC3ArchFiend;
+namespace BossMod.Dawntrail.BeastChess.Board1.BC3ArchFiend;
 
 // 骨架+机制预警：上级恶魔场（C 槽，矩形 40x30）。
 // AID 数据来自 2026-09-12 两份回放（10_24_58 / 11_07_18）交叉验证 + xivapi Action 表（CastType/EffectRange/XAxisModifier/Omen），

@@ -1,6 +1,7 @@
+// 斗兽奇弈·低段第一盘（Board1）
 using BossMod.Dawntrail.Foray.CriticalEngagement;
 
-namespace BossMod.Dawntrail.BeastChess.BC4ScorpionQueen;
+namespace BossMod.Dawntrail.BeastChess.Board1.BC4ScorpionQueen;
 
 // 骨架+机制预警：祸蛛蝎场（A 槽，圆 R20）。场内灵蛛蝎 0x4B8C x9（可被玩家魅惑助战，46909 激光瞄准 Enemy/boss，对玩家无威胁）。
 // AID 数据来自 2026-09-12 两份回放（10_28_16 / 11_27_07）交叉验证 + xivapi Action 表（CastType/EffectRange/Omen），

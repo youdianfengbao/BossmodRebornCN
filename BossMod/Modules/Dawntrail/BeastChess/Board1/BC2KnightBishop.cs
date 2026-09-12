@@ -1,7 +1,8 @@
+// 斗兽奇弈·低段第一盘（Board1）
 using BossMod.Components;
 using BossMod.Dawntrail.Foray.CriticalEngagement;
 
-namespace BossMod.Dawntrail.BeastChess.BC2KnightBishop;
+namespace BossMod.Dawntrail.BeastChess.Board1.BC2KnightBishop;
 
 // 双 boss 场（骑士 primary，主教同场需击杀）。
 // AID 数据来自 2026-09-12 两份回放（10_21_47 / 10_59_25）交叉验证 + xivapi Action 表（CastType/EffectRange/XAxisModifier），
