@@ -176,6 +176,19 @@ abstract class ReplayValidatedCastAOEs(BossModule module) : Components.GenericAO
         _pending.Sort((left, right) => left.AOE.Activation.CompareTo(right.AOE.Activation));
     }
 
+    // 子类可用于语义性 activation 覆写（如把同批结算的最后一段对齐到前一段时刻，避免 AI 等待-赶-折返拉扯）。
+    // 仅改显示/AI 判定时序，游戏结算不受影响；找不到匹配 pending 时为 no-op。
+    protected void AdjustPendingActivation(uint actionID, ulong actorID, DateTime activation)
+    {
+        var index = _pending.FindIndex(entry => entry.ActionID == actionID && entry.AOE.ActorID == actorID);
+        if (index < 0)
+            return;
+        var entry = _pending[index];
+        entry.AOE.Activation = activation;
+        _pending[index] = entry;
+        _pending.Sort((left, right) => left.AOE.Activation.CompareTo(right.AOE.Activation));
+    }
+
     private DateTime? RemoveResolvedByEvent(uint actionID, ulong actorID, DateTime now)
     {
         var index = -1;
