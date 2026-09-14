@@ -262,7 +262,7 @@ sealed class YoungerTablitaurPieceStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(BossModuleInfo.Maturity.WIP, PrimaryActorOID = (uint)OID.YoungerTablitaurPiece, Contributors = "Equilius", GroupType = BossModuleInfo.GroupType.CrucibleOfTheUnbroken, GroupID = 1089u, NameID = 14556u, SortOrder = 4)]
+[ModuleInfo(BossModuleInfo.Maturity.Contributed, PrimaryActorOID = (uint)OID.YoungerTablitaurPiece, Contributors = "Equilius", GroupType = BossModuleInfo.GroupType.CrucibleOfTheUnbroken, GroupID = 1089u, NameID = 14556u, SortOrder = 4)]
 public sealed class YoungerTablitaurPiece : BossModule
 {
     public static readonly uint[] Bosses = [(uint)OID.YoungerTablitaurPiece, (uint)OID.ElderTablitaurPiece];
