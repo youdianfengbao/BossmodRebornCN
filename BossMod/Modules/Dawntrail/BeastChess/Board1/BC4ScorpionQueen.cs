@@ -69,8 +69,9 @@ sealed class BedrockUplift(BossModule module) : ReplayValidatedCastAOEs(module)
 // 毒蛛网九圈序贯：每波 9 个圆 R9（boss 圆心 1 + R15 八方位 8），9 个 Helper 各自读条 5.7s（显示层 9 圈全画，
 // activation=CastFinishAt 天然按序推进，临近 1s 生效的圈标 danger）。回放实测生效顺序：圆心先炸，随后环上
 // 8 圈按顺/逆时针交替、起点方位逐波旋转依次点击，相邻圈约 1s（回放秒级精度）。
-// AI 层：全部未结算圈都挂禁区（用户实测修正：曾跳过最早 2 个导致中心圈无禁区）；
-// AddForbiddenZone 的 activation 时间语义自然让"最近生效的最紧迫、远生效的低优先"，无需人工限数或绿圈引导。
+// AI 层：非场心波全部未结算圈挂禁区（用户实测修正：曾跳过最早 2 个导致中心圈无禁区）；
+// 场心波只挂首圈 activation+1.2s 内的最早段并加 R11 内圈引导（对齐 Kano XBMB04；用户实测：
+// 全挂会导致 AI 在"最后炸的圈"位置干等 7-8s、炸完后被默认 uptime 目标拉回场心静止）。
 sealed class VenomWebs(BossModule module) : ReplayValidatedCastAOEs(module)
 {
     protected override int MaxDisplayed => 9;
@@ -85,11 +86,21 @@ sealed class VenomWebs(BossModule module) : ReplayValidatedCastAOEs(module)
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        var pending = Pending; // 基类保证按 activation 升序，全部未结算圈挂禁区
+        var pending = Pending; // 基类保证按 activation 升序
+        var centeredWave = pending.Length > 0 && pending[0].AOE.Origin.AlmostEqual(Module.Center, 1f);
+        DateTime firstActivation = centeredWave ? pending[0].AOE.Activation : default;
         for (var i = 0; i < pending.Length; ++i)
         {
             ref readonly var entry = ref pending[i];
+            // 对齐 Kano XBMB04：场心波只挂最早段（首圈 activation+1.2s 内），远圈不进 AI，避免 AI 干等最后炸的圈
+            if (centeredWave && entry.AOE.Activation > firstActivation.AddSeconds(1.2d))
+                continue;
             hints.AddForbiddenZone(entry.AOE.ShapeDistance ?? entry.AOE.Shape.Distance(entry.AOE.Origin, entry.AOE.Rotation), entry.AOE.Activation);
+        }
+        if (centeredWave && pending.Length > 1)
+        {
+            // 对齐 Kano XBMB04：内圈引导——首圈炸前 1s 把圆心 R11 设为禁区，把 AI 赶到 R11~R15 环带
+            hints.AddForbiddenZone(new SDInvertedCircle(pending[0].AOE.Origin, 11f), firstActivation.AddSeconds(-1d));
         }
     }
 }
