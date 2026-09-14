@@ -13,6 +13,7 @@ public abstract class BeastChessModule(WorldState ws, Actor primary) : BossModul
         (new WPos(120f, -420f), new ArenaBoundsCircle(20f)), // A 槽：食人魔 / 骑士+主教 / 祸蛛蝎
         (new WPos(520f, -420f), new ArenaBoundsRect(12f, 19f)), // B 槽：魅惑女妖·帕德索，矩形 24x38（用户 2026-09-12 实测场域约 (507,-400)~(533,-440)，边缘有凹凸墙，半宽自 13x20 各缩 1 避墙后按中心对称绘制）
         (new WPos(520f, 0f), new ArenaBoundsRect(20f, 15f)), // C 槽：上级恶魔，矩形 40x30 (x 500-540, z -15..15)
+        (new WPos(120f, 0f), new ArenaBoundsSquare(20f)), // D 槽：刺鱼魔（BC6），方 20x20——上游 PiscodemonPiece 同 (120,0)+方 20，Kano 通用场地表一致；参数为上游值未回放验证
     ];
 
     private static (WPos Center, ArenaBounds Bounds) SlotFor(WPos pos)
