@@ -69,6 +69,9 @@ public abstract class BossModule : IDisposable
         return relevantEnemies;
     }
 
+    // hints shown before the pull starts (CombatReborn 官方斗兽模块用)
+    public virtual string[] PrePullHints => [];
+
     public virtual Actor? GetDefaultTarget(int slot)
     {
         if (!PrimaryActor.IsDeadOrDestroyed && PrimaryActor.IsTargetable)

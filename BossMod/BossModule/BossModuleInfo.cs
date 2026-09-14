@@ -81,6 +81,7 @@ public static class BossModuleInfo
         BozjaDuel, // group id is ContentFinderCondition row, name id is DynamicEvent row
         EurekaNM, // group id is ContentFinderCondition row, name id is Fate row
         GoldSaucer, // group id is GoldSaucerTextData row
+        CrucibleOfTheUnbroken, // CombatReborn 官方斗兽模块用
     }
 
     public enum HuntRank : uint { B, A, S, SS }

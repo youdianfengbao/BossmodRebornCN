@@ -30,6 +30,9 @@ public static class SortHelpers
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void SortForbiddenDirectionsByActivation(List<(Angle, Angle, DateTime)> list) => RefSort.Sort(CollectionsMarshal.AsSpan(list), new ForbiddenDirectionActivationComparer());
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void SortKnockbacksByActivation(List<Components.GenericKnockback.Knockback> list) => RefSort.Sort(CollectionsMarshal.AsSpan(list), new KnockbackActivationComparer()); // CombatReborn 官方斗兽模块用
+
     private readonly struct AOEActorIDComparer : IRefComparer<Components.GenericAOEs.AOEInstance>
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -52,6 +55,12 @@ public static class SortHelpers
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int Compare(ref (Angle, Angle, DateTime) a, ref (Angle, Angle, DateTime) b) => a.Item3.CompareTo(b.Item3);
+    }
+
+    private readonly struct KnockbackActivationComparer : IRefComparer<Components.GenericKnockback.Knockback>
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int Compare(ref Components.GenericKnockback.Knockback a, ref Components.GenericKnockback.Knockback b) => a.Activation.CompareTo(b.Activation);
     }
 }
 
